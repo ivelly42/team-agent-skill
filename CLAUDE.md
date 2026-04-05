@@ -5,7 +5,7 @@
 
 ## Overview
 
-범용 팀 에이전트 구성 스킬. 프로젝트 분석 후 최적 에이전트 팀(3~8명)을 자동 추천하고 TeamCreate로 병렬 실행. 보안 점검, 코드 리뷰, 리팩토링, 성능 최적화, 디버깅 등 다목적.
+범용 팀 에이전트 구성 스킬. 프로젝트 분석 후 최적 에이전트 팀(3~8명)을 자동 추천하고 Agent 도구로 병렬 실행. 보안 점검, 코드 리뷰, 리팩토링, 성능 최적화, 디버깅 등 다목적.
 
 ## Key Files
 
@@ -21,4 +21,4 @@
 ```
 
 ## Current Status
-[2026-03-30] 시니어 아키텍트 리뷰 완료. 18건 발견 (CRITICAL 2, HIGH 4, MEDIUM 7, LOW 5). 핵심: allowed-tools 누락, Agent 도구 파라미터 검증 필요, Phase 4 대기 메커니즘 미정의.
+[2026-04-06] 8건 일괄 수정 — SRC_COUNT find통일+비코드폴백, API경로탐지, Phase2검증강화+백엔드파싱분리, telegram graceful, codex-verification입력계약, codex-template치환규칙+grep수정, subagent_type고정

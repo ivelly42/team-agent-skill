@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "severity": { "type": "string", "enum": ["Critical", "High", "Medium", "Low", "Info"] },
+          "title": { "type": "string" },
+          "file": { "type": "string" },
+          "line_start": { "type": "integer" },
+          "line_end": { "type": "integer" },
+          "code_snippet": { "type": "string" },
+          "evidence": { "type": "string" },
+          "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+          "action": { "type": "string" },
+          "category": { "type": "string", "enum": ["api-hook-mismatch", "route-link-mismatch", "state-transition-gap", "orphan-endpoint"] }
+        },
+        "required": ["severity", "title", "file", "line_start", "line_end", "code_snippet", "evidence", "confidence", "action"]
+      }
+    },
+    "ideas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": { "type": "string" },
+          "difficulty": { "type": "string", "enum": ["low", "medium", "high"] },
+          "impact": { "type": "string", "enum": ["low", "medium", "high"] },
+          "detail": { "type": "string" }
+        },
+        "required": ["title", "difficulty", "impact", "detail"]
+      }
+    }
+  },
+  "required": ["findings", "ideas"]
+}

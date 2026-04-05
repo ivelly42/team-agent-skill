@@ -1,0 +1,16 @@
+# 실행 산출물 (로컬 데이터)
+docs/team-agent/.runs/
+docs/team-agent/.history.jsonl
+docs/team-agent/*-report.md
+docs/team-agent/*-handoff.md
+docs/team-agent/*-merged-analysis.md
+
+# 설계 초안 (배포 불필요)
+docs/team-agent/draft-*.md
+docs/superpowers/
+
+# OS
+.DS_Store
+
+# Codex 세션
+.context/
