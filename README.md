@@ -90,12 +90,12 @@ flowchart TB
 
 ```bash
 # Claude Code에서 스킬 설치
-claude install-skill https://github.com/chanhocode/team-agent-skill
+claude install-skill https://github.com/ivelly42/team-agent-skill
 ```
 
 또는 수동 설치:
 ```bash
-git clone https://github.com/chanhocode/team-agent-skill.git \
+git clone https://github.com/ivelly42/team-agent-skill.git \
   ~/.claude/skills/team-agent
 ```
 
