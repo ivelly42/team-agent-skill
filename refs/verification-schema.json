@@ -1,0 +1,71 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "confirmed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "finding_title": { "type": "string" },
+          "evidence": { "type": "string" },
+          "confidence": { "type": "string", "enum": ["high", "medium", "low"] }
+        },
+        "required": ["finding_title", "evidence", "confidence"]
+      }
+    },
+    "disputed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "finding_title": { "type": "string" },
+          "actual_severity": { "type": "string", "enum": ["Critical", "High", "Medium", "Low", "Info"] },
+          "reason": { "type": "string" }
+        },
+        "required": ["finding_title", "actual_severity", "reason"]
+      }
+    },
+    "rejected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "finding_title": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["finding_title", "reason"]
+      }
+    },
+    "additions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "severity": { "type": "string", "enum": ["Critical", "High", "Medium", "Low", "Info"] },
+          "title": { "type": "string" },
+          "file": { "type": "string" },
+          "evidence": { "type": "string" }
+        },
+        "required": ["severity", "title", "file", "evidence"]
+      }
+    },
+    "idea_additions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": { "type": "string" },
+          "detail": { "type": "string" }
+        },
+        "required": ["title", "detail"]
+      }
+    }
+  },
+  "required": ["confirmed", "disputed", "rejected", "additions"]
+}
