@@ -99,6 +99,14 @@ git clone https://github.com/ivelly42/team-agent-skill.git \
   ~/.claude/skills/team-agent
 ```
 
+PowerShell 설치
+```bash
+New-Item -ItemType Directory -Force -Path "$HOME\.claude\skills" | Out-Null
+git clone https://github.com/ivelly42/team-agent-skill.git "$HOME\.claude\skills\team-agent"
+```
+
+
+
 ### Requirements
 - [Claude Code](https://claude.ai/claude-code) CLI
 - (선택) [Codex CLI](https://github.com/openai/codex) — `--codex` 모드용
