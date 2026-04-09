@@ -1,13 +1,26 @@
-# /team-agent — AI Agent Team Orchestrator for Claude Code
+<div align="center">
 
-> **하나의 명령으로 전문가 팀을 소환하세요.**
-> 보안 감사, 코드 리뷰, 성능 분석, 아키텍처 검토를 병렬 에이전트 팀이 동시에 수행합니다.
+# /team-agent
+
+### AI Agent Team Orchestrator for Claude Code
+
+[![Roles](https://img.shields.io/badge/roles-33+-8B5CF6?style=flat-square)](#-agent-roles-33)
+[![Checklists](https://img.shields.io/badge/checklists-261_items-10B981?style=flat-square)](#-agent-roles-33)
+[![Domains](https://img.shields.io/badge/domains-dev_·_game_·_quant_·_defi-F59E0B?style=flat-square)](#-domain-coverage)
+[![Hybrid](https://img.shields.io/badge/hybrid-Claude_+_Codex-3B82F6?style=flat-square)](#-hybrid-ai)
+
+**하나의 명령으로 전문가 팀을 소환하세요.**
+
+보안, 성능, 아키텍처, 게임 디자인, 퀀트 전략, DeFi 분석까지 —<br/>
+병렬 에이전트 팀이 동시에 분석하고, 다른 AI가 독립 검증합니다.
 
 ```
 /team-agent 보안 점검
 ```
 
-5명의 전문 에이전트가 프로젝트를 분석하고, Codex(GPT)가 독립 검증하고, 종합 보고서를 생성합니다.
+<img src="https://img.shields.io/badge/Claude_Code-skill-7C3AED?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTIgMkM2LjQ4IDIgMiA2LjQ4IDIgMTJzNC40OCAxMCAxMCAxMCAxMC00LjQ4IDEwLTEwUzE3LjUyIDIgMTIgMnoiIGZpbGw9IiNmZmYiLz48L3N2Zz4=&logoColor=white" alt="Claude Code Skill"/>
+
+</div>
 
 ---
 
@@ -15,49 +28,56 @@
 
 코드 리뷰를 한 관점에서만 하면 맹점이 생깁니다.
 
-| 기존 방식 | /team-agent |
-|----------|-------------|
-| 1명이 순차 분석 | 3~8명 병렬 분석 |
-| 한 관점 | 보안 + 품질 + 성능 + 아키텍처 동시 |
-| 자기 검증 | Codex(GPT) 독립 교차 검증 |
-| 텍스트 나열 | 구조화 JSON + 심각도 분류 + 히스토리 diff |
+| | 기존 방식 | /team-agent |
+|---|----------|-------------|
+| **분석 인원** | 1명 순차 | 3~8명 병렬 |
+| **관점** | 단일 | 보안 + 품질 + 성능 + 아키텍처 동시 |
+| **검증** | 자기 검증 | Codex(GPT) 독립 교차 검증 |
+| **출력** | 텍스트 나열 | 구조화 JSON + 심각도 + 히스토리 diff |
+| **도메인** | 범용만 | 게임 · 퀀트 · DeFi · 라이브옵스 등 |
+| **언어** | 고정 | 감지된 스택별 동적 전문가 |
 
 ---
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph Input
-        U[사용자] -->|"/team-agent 보안 점검"| S[SKILL.md 스킬 엔진]
-    end
-
-    subgraph Analysis["Phase 1-2: 병렬 분석"]
-        S --> P[프로젝트 자동 스캔]
-        P --> T[팀 구성 추천]
-        T --> B1[보안 감사<br/>Claude]
-        T --> B2[코드 리뷰어<br/>Claude]
-        T --> B3[디버거<br/>Claude]
-        T --> B4[AI 엔지니어<br/>Codex]
-        T --> B5[문서 아키텍트<br/>Codex]
-    end
-
-    subgraph Verify["Phase 3-4: 검증 + 종합"]
-        B1 & B2 & B3 & B4 & B5 --> M[결과 병합<br/>중복 제거 + 심각도 통일]
-        M --> V[Codex 독립 검증<br/>교차 대조]
-        V --> R[종합 보고서<br/>report.md + handoff.md]
-    end
-
-    subgraph Output
-        R --> CH[채팅 요약 테이블]
-        R --> HI[히스토리 diff<br/>이전 실행 대비]
-        R --> NX[후속 작업 추천<br/>/cso, /review, /qa]
-    end
-
-    style Input fill:#1a1a2e,color:#e0e0ff
-    style Analysis fill:#16213e,color:#e0e0ff
-    style Verify fill:#0f3460,color:#e0e0ff
-    style Output fill:#533483,color:#e0e0ff
+```
+                    ┌─────────────────────────┐
+                    │   /team-agent 보안 점검   │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │    프로젝트 자동 스캔     │
+                    │  스택 · 규모 · 테스트    │
+                    └────────────┬────────────┘
+                                 │
+              ┌──────────────────┼──────────────────┐
+              │                  │                   │
+    ┌─────────▼──────┐ ┌────────▼───────┐ ┌────────▼───────┐
+    │  Wave 1 (3명)  │ │  Wave 2 (3명)  │ │  Codex 병렬   │
+    │ 보안 · 성능 ·  │ │ 아키텍트 · DB  │ │  탐색 · 문서  │
+    │ 코드 리뷰      │ │ · 프론트엔드   │ │               │
+    └───────┬────────┘ └───────┬────────┘ └───────┬───────┘
+            │                  │                   │
+            └──────────────────┼───────────────────┘
+                               │
+                  ┌────────────▼────────────┐
+                  │   결과 병합 + 품질 필터   │
+                  │  중복 제거 · 교차 확인    │
+                  │  시크릿 스크러빙          │
+                  └────────────┬────────────┘
+                               │
+                  ┌────────────▼────────────┐
+                  │   Codex 독립 검증        │
+                  │  반증 시도 → 대조 검증    │
+                  └────────────┬────────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              │                │                 │
+    ┌─────────▼──────┐ ┌──────▼──────┐ ┌───────▼───────┐
+    │  종합 보고서   │ │  히스토리    │ │  후속 작업     │
+    │  report.md     │ │  diff        │ │  추천          │
+    └────────────────┘ └─────────────┘ └───────────────┘
 ```
 
 ---
@@ -65,24 +85,33 @@ flowchart TB
 ## Features
 
 ### Core
-- **자동 팀 구성** — 프로젝트 스택/규모를 분석하여 3~8명의 최적 팀을 추천
-- **18개 전문 역할** — 보안, 성능, 아키텍처, 프론트엔드, DB, AI/ML, 디버깅 등
-- **구조화 JSON 출력** — 모든 발견 사항에 파일, 줄 번호, 코드 조각, 근거 포함
-- **히스토리 diff** — 이전 실행과 자동 비교 (신규/해결/지속 표시)
+- **33+ 전문 역할** — 보안, 성능, 아키텍처부터 게임 디자인, 퀀트 전략, DeFi까지
+- **261개 체크리스트** — 역할별 심층 분석 기준 (탐색 힌트 포함)
+- **즉석 역할 생성** — 풀에 없는 도메인이면 최대 2개까지 커스텀 역할 자동 생성
+- **동적 언어 전문가** — Go, Rust, Python, TypeScript, Java, Ruby, Swift, PHP, Elixir 자동 감지
+- **구조화 JSON 출력** — 파일, 줄 번호, 코드 조각, 근거, 확신도 포함
+- **히스토리 diff** — 이전 실행과 자동 비교 (🆕 신규 / ✅ 해결 / 🔄 지속)
+- **시크릿 자동 스크러빙** — 에이전트 출력에서 민감 패턴 기계적 redaction
 
 ### Hybrid AI
-- **`--codex` 모드** — Claude + Codex(GPT) 하이브리드 팀 구성
+- **`--codex` 모드** — Claude + Codex(GPT) 하이브리드 팀
   - `hybrid` (기본): 정밀 분석 → Claude, 나머지 → Codex
   - `all`: 전원 Codex (비용 최소)
-- **교차 검증** — 팀 결과를 다른 AI 모델이 독립 분석 후 대조
+- **교차 검증** — 반증 시도 + 독립 분석 + 대조 검증 3단계
+- **역검증 원칙** — Claude→Codex, Codex→Claude 교차
 
 ### Workflow
-- **`--auto`** — 질문 없이 즉시 실행 (CI/자동화용)
-- **`--deep`** — 에이전트 간 결과 통합 2차 라운드
-- **`--scope <path>`** — 모노레포에서 특정 디렉토리만 분석
-- **`--resume <RUN_ID>`** — 실패한 에이전트만 재실행
-- **`--notify telegram`** — 완료 시 텔레그램 알림
-- **`--dry-run`** — 에이전트 없이 팀 구성/프롬프트만 미리보기
+| 플래그 | 설명 |
+|--------|------|
+| `--auto` | 질문 없이 즉시 실행 (CI/자동화용) |
+| `--deep` | 에이전트 간 결과 통합 2차 라운드 |
+| `--diff [base]` | 변경 파일만 분석 (PR 리뷰용, bounded incremental) |
+| `--scope <path>` | 모노레포에서 특정 디렉토리만 분석 |
+| `--resume <RUN_ID>` | 실패한 에이전트만 재실행 |
+| `--codex [all\|hybrid]` | Claude+GPT 하이브리드 팀 |
+| `--notify telegram` | 완료 시 텔레그램 알림 |
+| `--dry-run` | 팀 구성/프롬프트만 미리보기 |
+| `update` | 스킬 최신 버전으로 업데이트 |
 
 ---
 
@@ -95,27 +124,41 @@ claude install-skill https://github.com/ivelly42/team-agent-skill
 
 또는 수동 설치:
 
-### macOS / Linux
+<details>
+<summary><b>macOS / Linux</b></summary>
+
 ```bash
 git clone https://github.com/ivelly42/team-agent-skill.git \
   ~/.claude/skills/team-agent
 ```
+</details>
 
-### Windows (PowerShell)
+<details>
+<summary><b>Windows (PowerShell)</b></summary>
+
 ```powershell
 git clone https://github.com/ivelly42/team-agent-skill.git `
   "$env:USERPROFILE\.claude\skills\team-agent"
 ```
+</details>
 
-### Windows (CMD)
+<details>
+<summary><b>Windows (CMD)</b></summary>
+
 ```cmd
 git clone https://github.com/ivelly42/team-agent-skill.git ^
   "%USERPROFILE%\.claude\skills\team-agent"
 ```
+</details>
 
 ### Requirements
 - [Claude Code](https://claude.ai/claude-code) CLI
 - (선택) [Codex CLI](https://github.com/openai/codex) — `--codex` 모드용
+
+### Update
+```
+/team-agent update
+```
 
 ---
 
@@ -131,59 +174,168 @@ git clone https://github.com/ivelly42/team-agent-skill.git ^
 # Codex 하이브리드 — Claude+GPT 교차 분석
 /team-agent --codex 전체 점검
 
+# PR 리뷰 — 변경 파일만 분석
+/team-agent --diff main 변경 사항 리뷰
+
 # 모노레포 — 특정 패키지만
 /team-agent --scope packages/api 백엔드 점검
 
 # 심층 분석 — 2차 통합 라운드
 /team-agent --deep 성능 최적화
 
-# 실패 복구 — 이전 실행의 실패 에이전트만 재실행
+# 실패 복구
 /team-agent --resume 2026-04-06-001534
+
+# 업데이트
+/team-agent update
+```
+
+---
+
+## Agent Roles (33+)
+
+<table>
+<tr>
+<td colspan="2" align="center"><b>🔧 Software Engineering</b></td>
+</tr>
+<tr><td>
+
+| # | 역할 | 체크리스트 |
+|---|------|----------|
+| 1 | 보안 감사 | OWASP, 인증, 시크릿, Rate limiting |
+| 2 | {언어} 전문가 | 스택별 동적 생성 (9개 언어) |
+| 3 | 백엔드 아키텍트 | 레이어, API, 서비스 경계, 이벤트 |
+| 4 | 프론트엔드 | 컴포넌트, 상태, 접근성, 반응형 |
+| 5 | DB 아키텍트 | 스키마, 인덱스, 마이그레이션, 쿼리 |
+| 6 | 성능 엔지니어 | N+1, 캐싱, 번들, 메모리 누수 |
+| 7 | AI/ML 엔지니어 | 프롬프트, 모델 통합, 평가, 가드레일 |
+| 8 | 디버거 | 에러 패턴, 로그, 레이스 컨디션 |
+
+</td><td>
+
+| # | 역할 | 체크리스트 |
+|---|------|----------|
+| 9 | 클라우드 아키텍트 | IaC, 멀티 리전, 비용 |
+| 10 | 배포 엔지니어 | CI/CD, 컨테이너, 롤백 |
+| 11 | 문서 아키텍트 | API 문서, 온보딩, 아키텍처 |
+| 12 | TDD 오케스트레이터 | 피라미드, 커버리지, CI |
+| 13 | UI/UX 디자이너 | 사용성, 접근성, 디자인 일관성 |
+| 14 | 장애 대응 전문가 | 분류, 모니터링, 복구, 포스트모템 |
+| 15 | 코드 리뷰어 | DRY, 복잡도, 에러 처리, 타입 |
+| 16 | 코드 탐색가 | 프로젝트 구조, 의존성 매핑 |
+| 17 | 통합 정합성 (QA) | API↔훅, 경로↔링크, 상태전이 |
+| 18 | 데이터 파이프라인 | ETL, 스키마 진화, 모니터링 |
+
+</td></tr>
+<tr>
+<td colspan="2" align="center"><b>🎮 Game Development</b></td>
+</tr>
+<tr><td colspan="2">
+
+| # | 역할 | 초점 |
+|---|------|------|
+| 19 | 게임 디자인 | 코어 루프, 밸런싱, 시스템 디자인, 온보딩 |
+| 20 | 게임 QA | 치트 방지, 재현 경로, 에지 케이스, 네트코드 |
+| 21 | 내러티브 디자인 | 분기 구조, 로컬라이제이션, 컷신, 퀘스트 |
+| 22 | 게임 이코노미 | 인게임 통화, 싱크/소스, 인플레이션, 시뮬레이션 |
+| 23 | 모네타이제이션 | IAP, 배틀패스, 광고, 규제 컴플라이언스 |
+| 24 | 라이브옵스 | 시즌, A/B 테스트, 이벤트 스케줄링, KPI |
+| 25 | 유저 리서치 | 플레이테스트, 히트맵, 설문, 리텐션 |
+
+</td></tr>
+<tr>
+<td colspan="2" align="center"><b>📈 Quantitative Finance & DeFi</b></td>
+</tr>
+<tr><td colspan="2">
+
+| # | 역할 | 초점 |
+|---|------|------|
+| 26 | 퀀트 전략 | 알파 팩터, 시그널, 포트폴리오 최적화, 거래 비용 |
+| 27 | 트레이딩 시스템 | 주문 관리, 레이턴시, 마켓 커넥터, 장애 복구 |
+| 28 | 리스크 관리 | VaR, 포지션 한도, 마진, 스트레스 테스트 |
+| 29 | 마켓 마이크로스트럭처 | 오더북, 스프레드, 슬리피지, 호가 분석 |
+| 30 | 온체인 분석 | 트랜잭션 추적, MEV, 가스 최적화, 컨트랙트 |
+| 31 | DeFi 분석 | TVL, IL, 풀 효율성, 프로토콜 리스크 |
+| 32 | 백테스트/시뮬레이션 | 룩어헤드 바이어스, 슬리피지 모델, 몬테카를로 |
+| 33 | 수학/통계 | 시계열, 확률 모형, 베이지안, 최적화 |
+
+</td></tr>
+<tr>
+<td colspan="2" align="center"><b>✨ Ad-hoc (즉석 생성)</b></td>
+</tr>
+<tr><td colspan="2">
+
+풀의 33개 역할로 커버 안 되는 도메인이면 **최대 2개**까지 즉석 역할을 자동 생성합니다.
+
+```
+예: "블록체인 브릿지 보안 전문가", "음성 AI 품질 엔지니어"
+```
+
+즉석 역할은 `[즉석]` 태그로 표시되며, 사용자가 제거 가능합니다.
+
+</td></tr>
+</table>
+
+---
+
+## Domain Coverage
+
+```
+┌─────────────────────────────────────────────────────┐
+│                                                     │
+│   Software Engineering          Game Development    │
+│   ┌─────────────────────┐      ┌────────────────┐  │
+│   │ 보안 · 성능 · 아키   │      │ 디자인 · QA     │  │
+│   │ 텍처 · DB · 프론트   │      │ 내러티브 · 이코  │  │
+│   │ 엔드 · 테스트 · AI  │      │ 노미 · 라이브옵  │  │
+│   │ · 인프라 · 디버깅   │      │ 스 · 유저 리서치 │  │
+│   └─────────────────────┘      └────────────────┘  │
+│                                                     │
+│   Quantitative Finance          Ad-hoc Roles        │
+│   ┌─────────────────────┐      ┌────────────────┐  │
+│   │ 퀀트 · 트레이딩 ·    │      │ 풀에 없는 도메   │  │
+│   │ 리스크 · 마이크로    │      │ 인은 즉석 생성   │  │
+│   │ 스트럭처 · 온체인    │      │ (최대 2개)       │  │
+│   │ · DeFi · 백테스트   │      │                  │  │
+│   └─────────────────────┘      └────────────────┘  │
+│                                                     │
+└─────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## How It Works
 
-```mermaid
-sequenceDiagram
-    participant U as 사용자
-    participant S as SKILL 엔진
-    participant A as Agent 팀 (3~8명)
-    participant C as Codex 검증
-
-    U->>S: /team-agent 보안 점검
-    S->>S: 프로젝트 스캔 (스택, 규모, 테스트)
-    S->>U: 팀 추천 (5명) — 승인?
-    U->>S: 확인
-    S->>A: 병렬 실행 (3명씩 배치)
-    A-->>S: JSON 결과 수집
-    S->>S: 중복 병합 + 품질 필터
-    S->>C: 독립 분석 요청
-    C-->>S: 검증/이의/추가 발견
-    S->>U: 종합 보고서 + 채팅 요약
 ```
-
-### Agent Role Pool (18 roles)
-
-| Category | Roles |
-|----------|-------|
-| Security | 보안 감사 |
-| Language | Python 전문가, TypeScript 전문가 |
-| Architecture | 백엔드 아키텍트, 클라우드 아키텍트 |
-| Development | 프론트엔드 개발자 |
-| Data | DB 아키텍트 |
-| Performance | 성능 엔지니어 |
-| AI | AI/ML 엔지니어 |
-| Debugging | 디버거 |
-| Infrastructure | 배포 엔지니어 |
-| Documentation | 문서 아키텍트 |
-| Testing | TDD 오케스트레이터 |
-| Design | UI/UX 디자이너 |
-| Operations | 장애 대응 전문가 |
-| Quality | 코드 리뷰어 |
-| Analysis | 코드 탐색가 |
-| QA | 통합 정합성 검증 |
+ 사용자                    SKILL 엔진                  Agent 팀                 Codex 검증
+   │                          │                          │                         │
+   │  /team-agent 보안 점검   │                          │                         │
+   │─────────────────────────▶│                          │                         │
+   │                          │  프로젝트 스캔            │                         │
+   │                          │  (스택·규모·테스트)       │                         │
+   │                          │                          │                         │
+   │  팀 추천 (5명) — 승인?   │                          │                         │
+   │◁─────────────────────────│                          │                         │
+   │  확인                    │                          │                         │
+   │─────────────────────────▶│                          │                         │
+   │                          │  Wave 1 (3명) 병렬       │                         │
+   │                          │─────────────────────────▶│                         │
+   │                          │  Wave 2 + Codex 병렬     │                         │
+   │                          │─────────────────────────▶│                         │
+   │                          │                          │                         │
+   │                          │  JSON 결과 수집           │                         │
+   │                          │◁─────────────────────────│                         │
+   │                          │                          │                         │
+   │                          │  병합 + 시크릿 스크러빙   │                         │
+   │                          │                          │                         │
+   │                          │  반증 시도 + 독립 분석    │                         │
+   │                          │─────────────────────────────────────────────────▶│
+   │                          │  검증/이의/추가 발견      │                         │
+   │                          │◁────────────────────────────────────────────────│
+   │                          │                          │                         │
+   │  종합 보고서 + 채팅 요약 │                          │                         │
+   │◁─────────────────────────│                          │                         │
+```
 
 ---
 
@@ -196,24 +348,30 @@ sequenceDiagram
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ### 개선 필요 항목
-| # | 변화 | 심각도 | 항목 | 동의 | Codex |
-|---|------|--------|------|------|-------|
-| 1 | 🆕  | High   | SQL 인젝션 가능성 | 3명 | ✅ |
-| 2 | 🔄  | Medium | 캐싱 미적용 | 2명 | ✅ |
+| # | 변화 | 심각도 | 항목        | 동의 | Codex |
+|---|------|--------|------------|------|-------|
+| 1 | 🆕   | High   | SQL 인젝션  | 3명  | ✅    |
+| 2 | 🔄   | Medium | 캐싱 미적용 | 2명  | ✅    |
+
+### Codex 검증 쟁점
+| # | 항목        | Claude 원본 근거   | Codex 반론        |
+|---|------------|-------------------|-------------------|
+| 1 | 토큰 만료   | 검증 로직 미구현    | 프레임워크 자동 처리 |
 
 ### 해결된 항목 (이전 실행 대비)
-| # | 항목 | 이전 심각도 |
-|---|------|-----------|
-| 1 | XSS 취약점 | High |
+| # | 항목       | 이전 심각도 |
+|---|-----------|-----------|
+| 1 | XSS 취약점 | High      |
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-### Files Generated
+### Generated Files
 ```
 docs/team-agent/
-  {RUN_ID}-{slug}-report.md    # 상세 보고서
-  {RUN_ID}-{slug}-handoff.md   # 다른 AI 전달용 요약
-  .runs/{RUN_ID}.json          # 실행 manifest
-  .history.jsonl               # 실행 히스토리 (append-only)
+├── {RUN_ID}-{slug}-report.md      # 상세 보고서
+├── {RUN_ID}-{slug}-handoff.md     # 다른 AI 전달용 요약
+├── .runs/{RUN_ID}.json            # 실행 manifest (schema v2)
+└── .history.jsonl                 # 실행 히스토리 (append-only)
 ```
 
 ---
@@ -222,30 +380,54 @@ docs/team-agent/
 
 ```
 team-agent/
-├── SKILL.md                        # 스킬 본체 (프롬프트 + 실행 로직)
-├── CLAUDE.md                       # 프로젝트 메타
+├── SKILL.md                           # 스킬 본체 (프롬프트 + 실행 로직)
+├── README.md                          # 이 파일
+├── CLAUDE.md                          # 프로젝트 메타
 ├── refs/
-│   ├── checklists.md               # 18개 역할별 분석 체크리스트
-│   ├── output-schema.json          # 에이전트 출력 JSON 스키마
-│   ├── codex-verification.md       # Codex 독립 검증 절차
-│   ├── codex-agent-template.md     # Codex 에이전트 탐색 지시
-│   └── integration-qa.md           # 통합 정합성 검증 체크리스트
-└── docs/team-agent/                # 실행 결과 (gitignored)
-    ├── .runs/                      # manifest 저장소
-    └── .history.jsonl              # 히스토리
+│   ├── checklists.md                  # 30개 역할 × 261개 체크리스트
+│   ├── output-schema.json             # 에이전트 출력 JSON 스키마 (7 categories)
+│   ├── verification-schema.json       # Codex 검증 구조화 JSON 스키마
+│   ├── codex-verification.md          # 반증 시도 + 독립 검증 절차
+│   ├── codex-agent-template.md        # Codex 에이전트 탐색 지시
+│   └── integration-qa.md             # 통합 정합성 검증 체크리스트
+└── docs/team-agent/                   # 실행 결과 (권장: .gitignore)
+    ├── .runs/                         # manifest 저장소
+    └── .history.jsonl                 # 히스토리
 ```
 
 ---
 
 ## Security
 
-이 스킬은 **임의 저장소를 분석**하도록 설계되었으므로 다음 보안 조치가 적용되어 있습니다:
+이 스킬은 **임의 저장소를 분석**하도록 설계되었으므로 다층 보안이 적용되어 있습니다:
 
-- **입력 sanitizer** — TASK_PURPOSE와 PROJECT_CONTEXT 모두에 구분자/제어문자 제거 적용
-- **Write 도구 패턴** — 사용자 입력은 셸을 거치지 않고 파일로 저장 후 Python에서 로드
-- **에이전트 격리** — `bypassPermissions` 모드에서 git worktree로 파일시스템 격리
-- **시크릿 보호** — API 키, 토큰 등은 code_snippet에서 `[REDACTED]`로 대체
-- **Scope 검증** — `--scope` 경로 순회 공격 방지 (realpath 검증)
+| 보안 계층 | 설명 |
+|----------|------|
+| **입력 sanitizer** | TASK_PURPOSE · PROJECT_CONTEXT 모두에 제어문자/구분자 제거 |
+| **Write 도구 패턴** | 사용자 입력은 셸을 거치지 않고 파일→Python 경로로만 전달 |
+| **에이전트 격리** | `bypassPermissions` 모드에서 git worktree 파일시스템 격리 |
+| **시크릿 보호** | API 키/토큰은 `[REDACTED]`로 자동 치환 (프롬프트 + 기계적 이중 방어) |
+| **Scope 검증** | `--scope` 경로 순회 공격 방지 (`realpath` 검증) |
+| **Resume 재정제** | manifest 복원 시 sanitizer 재적용 (변조 방어) |
+| **.gitignore 안내** | manifest에 프로젝트 구조 포함 → 공개 저장소 노출 방지 |
+
+---
+
+## Cost Model
+
+```
+예상 토큰: 총 ~150K (낙관 ~105K / 기대 ~150K / 비관 ~225K)
+
+  보안 감사 [Claude]:    ~45K  (정밀 ×1.5)
+  백엔드 아키텍트 [Codex]: ~75K  (구조 ×1.0 + Codex 오버헤드 45K)
+  문서 아키텍트 [Codex]:  ~56K  (문서 ×0.7 + Codex 오버헤드 45K)
+```
+
+| 모드 | 에이전트 | 토큰 | 시간 | 비용 |
+|------|---------|------|------|------|
+| 기본 (5명) | 5 | ~150K | 3-5분 | ~$1-2 |
+| `--deep` | 6 | ~200K | 5-8분 | ~$1.5-3 |
+| `--codex hybrid` | 5 | ~250K | 4-7분 | ~$1.5-2.5 |
 
 ---
 
@@ -255,7 +437,15 @@ MIT
 
 ---
 
-<p align="center">
-  Built with Claude Code + Codex hybrid orchestration<br/>
-  <em>"한 명보다 팀이 낫고, 한 모델보다 교차 검증이 낫다."</em>
-</p>
+<div align="center">
+<br/>
+
+**Built with Claude Code + Codex hybrid orchestration**
+
+*"한 명보다 팀이 낫고, 한 모델보다 교차 검증이 낫다."*
+
+<br/>
+
+[Install](#install) · [Usage](#usage) · [Roles](#-agent-roles-33) · [Security](#security)
+
+</div>
