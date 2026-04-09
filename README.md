@@ -94,18 +94,24 @@ claude install-skill https://github.com/ivelly42/team-agent-skill
 ```
 
 또는 수동 설치:
+
+### macOS / Linux
 ```bash
 git clone https://github.com/ivelly42/team-agent-skill.git \
   ~/.claude/skills/team-agent
 ```
 
-PowerShell 설치
-```bash
-New-Item -ItemType Directory -Force -Path "$HOME\.claude\skills" | Out-Null
-git clone https://github.com/ivelly42/team-agent-skill.git "$HOME\.claude\skills\team-agent"
+### Windows (PowerShell)
+```powershell
+git clone https://github.com/ivelly42/team-agent-skill.git `
+  "$env:USERPROFILE\.claude\skills\team-agent"
 ```
 
-
+### Windows (CMD)
+```cmd
+git clone https://github.com/ivelly42/team-agent-skill.git ^
+  "%USERPROFILE%\.claude\skills\team-agent"
+```
 
 ### Requirements
 - [Claude Code](https://claude.ai/claude-code) CLI
