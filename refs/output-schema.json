@@ -19,7 +19,7 @@
           "action": { "type": "string" },
           "category": { "type": "string", "enum": ["security", "performance", "quality", "architecture", "testing", "integration", "other"] }
         },
-        "required": ["severity", "title", "file", "line_start", "line_end", "code_snippet", "evidence", "confidence", "action"]
+        "required": ["severity", "title", "file", "line_start", "line_end", "code_snippet", "evidence", "confidence", "action", "category"]
       }
     },
     "ideas": {

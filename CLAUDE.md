@@ -21,4 +21,4 @@
 ```
 
 ## Current Status
-[2026-04-06] 8건 일괄 수정 — SRC_COUNT find통일+비코드폴백, API경로탐지, Phase2검증강화+백엔드파싱분리, telegram graceful, codex-verification입력계약, codex-template치환규칙+grep수정, subagent_type고정
+[2026-04-10] output-schema category필드 required 추가 — OpenAI Structured Outputs 정책(additionalProperties:false 시 모든 props required 필수) 충돌 해결, SKILL.md 프롬프트/검증/예시 동기화
