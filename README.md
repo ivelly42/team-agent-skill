@@ -194,6 +194,9 @@ git clone https://github.com/ivelly42/team-agent-skill.git ^
 ```bash
 /team-agent --resume 2026-04-06-001534  # 실패 에이전트만 재실행
 /team-agent --dry-run 성능 최적화       # 팀 구성 미리보기 (실행 안 함)
+/team-agent --gemini 코드 리뷰             # Gemini 하이브리드
+/team-agent --gemini all 보안 점검         # 전원 Gemini (최저가)
+/team-agent --cross 전체 감사              # 3-way + 3중 검증 (최고 정확도)
 /team-agent update                      # 스킬 최신 버전으로 업데이트
 ```
 

@@ -21,4 +21,4 @@
 ```
 
 ## Current Status
-[2026-04-10] output-schema category필드 required 추가 — OpenAI Structured Outputs 정책(additionalProperties:false 시 모든 props required 필수) 충돌 해결, SKILL.md 프롬프트/검증/예시 동기화
+[2026-04-19] Triple-Check + Shared Codemap 개선 완료 — `--gemini`/`--cross` 플래그 추가, Phase 0.3 공유 코드맵(3 backend), Phase 4-A-2 3중 검증(Codex+Gemini 2/3 합의), 역할 풀 33→42(AI/데이터 5+API/계약 4), manifest v3
