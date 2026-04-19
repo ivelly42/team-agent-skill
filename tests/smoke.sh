@@ -200,6 +200,47 @@ test_grep_batch_args() {
 }
 
 # ───────────────────────────────────────────────────────────
+# Test 8: 모든 backend CLI 호출 (codex exec, gemini -p) 가 timeout 래퍼로 가드됨
+# ───────────────────────────────────────────────────────────
+# Codex adversarial가 반복적으로 찾아낸 "unwrapped subprocess" 패턴을 lint로 고정.
+# SKILL.md와 refs/*.md에서 codex exec / gemini -p 가 등장하는 줄마다 앞쪽 ~20줄 안에
+# `_run_with_timeout` 호출이 있어야 한다. 없으면 regression.
+test_backend_calls_timeout_guarded() {
+    local name="unwrapped backend CLI 감지 (codex exec / gemini -p 가 timeout 가드됨)"
+    local files=("$SKILL_DIR/SKILL.md" "$SKILL_DIR/refs/codex-verification.md" \
+                 "$SKILL_DIR/refs/cross-verification.md" "$SKILL_DIR/refs/gemini-verification.md")
+    local unguarded=()
+
+    for f in "${files[@]}"; do
+        [ -f "$f" ] || continue
+        # codex exec / gemini -p 패턴 (단독 줄로 시작하거나 backslash 연결 직전)
+        # 단, 설명·help 텍스트·주석·table 안의 언급은 제외: 앞에 "#" 또는 table `|` 있는 줄
+        # 'docs text' context까지 스킵하는 근사법: awk로 라인 추출 + 이전 20줄 검사
+        while IFS=: read -r line_no _; do
+            [ -z "$line_no" ] && continue
+            # 설명 prose 패턴 제외 (한글 포함 / "설명" / 표 / 인용)
+            local context; context=$(sed -n "${line_no}p" "$f")
+            case "$context" in
+                *"|"*"|"*)            continue ;;     # 마크다운 테이블 행
+                "> "*|">  "*)         continue ;;     # 인용 블록
+                *"설명"*|*"예시"*|*"참고"*) continue ;;
+            esac
+            # 이전 20줄 안에 _run_with_timeout 있는지
+            local start=$((line_no - 20)); [ "$start" -lt 1 ] && start=1
+            if ! sed -n "${start},${line_no}p" "$f" | grep -q "_run_with_timeout\|timeout-wrapper"; then
+                unguarded+=("$f:$line_no → $context")
+            fi
+        done < <(grep -n -E '^[[:space:]]*(codex exec|gemini -m gemini|gemini -p -)' "$f" 2>/dev/null)
+    done
+
+    if [ "${#unguarded[@]}" = "0" ]; then
+        _pass "$name"
+    else
+        _fail "$name" "unguarded 발견: ${unguarded[*]}"
+    fi
+}
+
+# ───────────────────────────────────────────────────────────
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  team-agent smoke tests"
 echo "  SKILL_DIR: $SKILL_DIR"
@@ -213,6 +254,7 @@ test_symlink_guard
 test_schema_structure
 test_meta_mode_env_override
 test_grep_batch_args
+test_backend_calls_timeout_guarded
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 total=$((PASS+FAIL))
