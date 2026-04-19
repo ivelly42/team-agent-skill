@@ -117,19 +117,24 @@ SEVERITY_RANK = {"Critical": 5, "High": 4, "Medium": 3, "Low": 2, "Info": 1}
 from collections import Counter
 
 def consensus(claude_sev, codex_verdict, gemini_verdict):
-    # verdict: {"verdict": str, "suggested_severity": str | None}
+    # verdict: {"verdict": str, "suggested_severity": str | None} | None
 
-    # 특례: 검증자 둘 다 "not_an_issue" → 삭제 후보
+    # "이슈 아님" 조기 종료 — 2명 이상 verdict=not_an_issue면 삭제 후보
     verifier_verdicts = [
         v["verdict"] for v in (codex_verdict, gemini_verdict) if v is not None
     ]
     if len(verifier_verdicts) >= 2 and all(x == "not_an_issue" for x in verifier_verdicts):
-        return {"final_severity": None, "verdict": "deleted", "dispute": True}
+        return {
+            "final_severity": None,
+            "verdict": "deleted",
+            "severity_dispute": False,
+            "verifier_missing": False,
+        }
 
     votes = [claude_sev]
     for v in (codex_verdict, gemini_verdict):
         if v is None or v["verdict"] == "not_an_issue":
-            votes.append(None)  # "이슈 아님" 표 1표
+            votes.append(None)  # 검증 불가 또는 이슈 아님
         elif v["verdict"] == "confirmed":
             votes.append(claude_sev)
         else:  # disagree_severity
@@ -138,7 +143,12 @@ def consensus(claude_sev, codex_verdict, gemini_verdict):
     # 다수결: 가장 많이 나온 값 선택. 동점이면 보수적(낮은 severity) 선택.
     non_null = [v for v in votes if v is not None]
     if not non_null:
-        return {"final_severity": None, "verdict": "deleted", "dispute": True}
+        return {
+            "final_severity": None,
+            "verdict": "deleted",
+            "severity_dispute": False,
+            "verifier_missing": True,
+        }
     cnt = Counter(non_null)
     most_common = cnt.most_common()
     top_count = most_common[0][1]
@@ -146,9 +156,17 @@ def consensus(claude_sev, codex_verdict, gemini_verdict):
     # 동점이면 SEVERITY_RANK가 낮은 쪽 선택
     final = min(tied, key=lambda s: SEVERITY_RANK.get(s, 0))
 
-    # 이견 여부
-    dispute = len(set(non_null)) > 1 or any(v is None for v in votes)
-    return {"final_severity": final, "verdict": "kept", "dispute": dispute}
+    # 두 플래그를 분리:
+    # - severity_dispute: 심각도 판정이 실제로 갈렸는가
+    # - verifier_missing: 검증자 중 하나가 불가/이슈아님으로 자리를 비웠는가
+    severity_dispute = len(set(non_null)) > 1
+    verifier_missing = any(v is None for v in votes[1:])  # Claude 원본 제외, 검증자 2명만 체크
+    return {
+        "final_severity": final,
+        "verdict": "kept",
+        "severity_dispute": severity_dispute,
+        "verifier_missing": verifier_missing,
+    }
 ```
 
 ## 검증 실패 폴백
@@ -173,7 +191,7 @@ def consensus(claude_sev, codex_verdict, gemini_verdict):
       {"finding_id": "f-001", "verdict": "disagree_severity", "suggested_severity": "Medium"}
     ],
     "consensus": [
-      {"finding_id": "f-001", "final_severity": "High", "dispute": true}
+      {"finding_id": "f-001", "final_severity": "High", "severity_dispute": true, "verifier_missing": false}
     ]
   }
 }

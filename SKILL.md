@@ -1023,20 +1023,32 @@ fi
 
 #### manifest 기록
 
+사용자 유래 값은 Write 도구로 파일에 저장하고, python3 내에서 `json.load()`로 읽어 manifest에 주입한다. `"None"` 문자열 리터럴 혼동을 방지한다:
+
+1. **Write 도구**로 `/tmp/ta-${_RUN_ID}-codemap-meta.json`에 저장:
+```json
+{
+  "codemap_backend": "claude|codex|gemini",
+  "codemap_path": null
+}
+```
+(코드맵 생성 실패 시 `codemap_path`를 JSON `null`로, 성공 시 파일 경로 문자열로)
+
+2. **Bash 도구**로 manifest에 병합:
+
 ```bash
 python3 <<'PYEOF'
 import json
+meta = json.load(open("/tmp/ta-RUN_ID_VALUE-codemap-meta.json"))
 m = json.load(open("MANIFEST_PATH"))
-m["codemap_backend"] = "CODEMAP_BACKEND_VALUE"
-m["codemap_path"] = "CODEMAP_PATH_OR_NULL"  # None이면 null
+m["codemap_backend"] = meta["codemap_backend"]
+m["codemap_path"] = meta["codemap_path"]  # null 이면 Python None으로 자연 변환됨
 json.dump(m, open("MANIFEST_PATH","w"), ensure_ascii=False, indent=2)
 PYEOF
+rm -f "/tmp/ta-RUN_ID_VALUE-codemap-meta.json"
 ```
 
-치환 규칙:
-- `MANIFEST_PATH` → `$_MANIFEST`
-- `CODEMAP_BACKEND_VALUE` → `$_CODEMAP_BACKEND`
-- `CODEMAP_PATH_OR_NULL` → `$_CODEMAP` 값이 비어있으면 Python `None`으로, 있으면 문자열로
+치환 규칙: `MANIFEST_PATH` → `$_MANIFEST`, `RUN_ID_VALUE` → `$_RUN_ID`. 사용자 유래 값(코드맵 경로, 백엔드명)은 Write 도구로 JSON 파일에 저장해 Python `json.load()`로 읽는다 — Phase 0 manifest 생성과 동일 패턴.
 
 #### .gitignore 권고
 
