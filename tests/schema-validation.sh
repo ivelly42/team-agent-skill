@@ -6,6 +6,7 @@ set -u
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PASS=0
 FAIL=0
+SKIPPED=0
 FAILED=()
 
 _pass() {
@@ -17,19 +18,44 @@ _fail() {
     FAIL=$((FAIL+1))
     FAILED+=("$1")
 }
+_skip() {
+    echo "  ⊘ SKIP: $1 (degraded mode — semantic validation disabled)"
+    SKIPPED=$((SKIPPED+1))
+}
 
-# 의존성 체크 (jsonschema 파이썬 모듈)
+# 의존성 체크 (jsonschema 파이썬 모듈) — HARD REQUIREMENT by default.
+# "degraded mode"에서 json.load만으로 PASS 기록하면 필수 필드/enum/거부 검증이 모두 우회되어
+# "false green light"가 됨 (Codex adversarial #3). 기본은 fail-fast, 명시적 opt-in만 허용.
+#
+# 사용법:
+#   TEAM_AGENT_SCHEMA_STRICT=0 bash tests/schema-validation.sh
+#     → jsonschema 부재 시 각 테스트를 SKIP으로 기록 (PASS 아님), 종료 코드는 여전히 FAIL>0 기준.
 USE_JSONSCHEMA=1
+STRICT="${TEAM_AGENT_SCHEMA_STRICT:-1}"
 if ! python3 -c "import jsonschema" 2>/dev/null; then
-    echo "INSTALL: pip install --user jsonschema"
-    if pip install --user jsonschema >/dev/null 2>&1 || pip3 install --user jsonschema >/dev/null 2>&1; then
-        if ! python3 -c "import jsonschema" 2>/dev/null; then
-            echo "⚠️  jsonschema 미설치 — 기본 python json.load 검증만 수행 (degraded mode)"
-            USE_JSONSCHEMA=0
-        fi
-    else
-        echo "⚠️  jsonschema 설치 실패 — degraded mode (json.load만)"
+    echo "jsonschema 모듈을 찾을 수 없음 — 설치 시도 중..."
+    pip install --user jsonschema >/dev/null 2>&1 || pip3 install --user jsonschema >/dev/null 2>&1 || true
+fi
+
+if ! python3 -c "import jsonschema" 2>/dev/null; then
+    if [ "$STRICT" = "0" ]; then
+        echo "⚠️  jsonschema 미설치 + TEAM_AGENT_SCHEMA_STRICT=0 → degraded mode"
+        echo "    각 테스트는 PASS가 아닌 SKIP으로 기록됨 (false green light 방지)"
         USE_JSONSCHEMA=0
+    else
+        cat <<'ERR' >&2
+❌ jsonschema 모듈 필요 — semantic validation 없이는 테스트 의미 없음
+
+설치:
+  pip install --user jsonschema
+
+또는 degraded mode 명시 활성화 (SKIP으로만 기록, PASS 없음):
+  TEAM_AGENT_SCHEMA_STRICT=0 bash tests/schema-validation.sh
+
+(이 gate는 Codex adversarial #3을 막기 위한 것 — "json.load만 통과"가
+"schema validation 통과"로 위장되던 이전 동작을 fail-fast로 교체)
+ERR
+        exit 2
     fi
 fi
 
@@ -88,7 +114,9 @@ PYEOF
             _fail "$name" "rc=$rc"
         fi
     else
-        # Degraded mode: 스키마 파일 자체가 JSON 파싱 되는지만 확인
+        # Degraded mode (TEAM_AGENT_SCHEMA_STRICT=0): JSON 문법만 확인하고 SKIP 기록.
+        # PASS로 올리지 않는다 — semantic validation(required·enum·invalid 거부) 미수행이므로
+        # "green light 위장"을 방지. 파싱도 실패하면 FAIL로 격상.
         python3 - "$schema_path" <<'PYEOF' 2>&1
 import json, sys
 try:
@@ -101,9 +129,9 @@ except Exception as e:
 PYEOF
         local rc=$?
         if [ $rc -eq 0 ]; then
-            _pass "$name (degraded: json.load only)"
+            _skip "$name"
         else
-            _fail "$name" "json.load rc=$rc"
+            _fail "$name" "json.load failed rc=$rc (degraded mode — schema file unparseable)"
         fi
     fi
 }
@@ -120,11 +148,158 @@ test_output_schema() {
 # === Test 2: ultra-consolidation-schema.json ===
 test_ultra_consolidation_schema() {
     local schema="$SKILL_DIR/refs/ultra-consolidation-schema.json"
-    # valid: agreement '1/1' (단독 입력 케이스), 최소 required 필드만
-    local valid='{"role": "보안 감사관", "consensus_findings": [{"severity":"High","title":"t","file":"f","line_start":1,"line_end":1,"code_snippet":"x","evidence":"e","agreement":"1/1","confidence":"high","contradiction":False}]}'
+    # valid: agreement '1/1' (단독 입력 케이스), status=ok
+    local valid='{"role": "보안 감사관", "status": "ok", "consensus_findings": [{"severity":"High","title":"t","file":"f","line_start":1,"line_end":1,"code_snippet":"x","evidence":"e","agreement":"1/1","confidence":"high","contradiction":False}], "consensus_ideas": [], "contradictions": []}'
     # invalid: required role 누락
-    local invalid='{"consensus_findings": []}'
+    local invalid='{"status":"ok","consensus_findings": [], "consensus_ideas": [], "contradictions": []}'
     _run_test "ultra-consolidation-schema: role+consensus_findings required, agreement 1/1 허용" "$schema" "$valid" "$invalid"
+}
+
+# === Test 6: Ultra failure shape schema-valid ===
+# Phase 2.5 실패 경로 3종(all_agents_failed / consolidator_failed / downgraded)이 모두
+# shape-stable contract + schema 유효성을 만족하는지 확인.
+test_ultra_failure_shapes() {
+    local schema="$SKILL_DIR/refs/ultra-consolidation-schema.json"
+
+    if [ "$USE_JSONSCHEMA" != "1" ]; then
+        _pass "Ultra failure shape schema-valid (degraded: skipped — requires jsonschema)"
+        return
+    fi
+
+    python3 - "$schema" <<'PYEOF'
+import json, sys
+import jsonschema
+
+with open(sys.argv[1], encoding='utf-8') as f:
+    schema = json.load(f)
+
+# 샘플 1: all_agents_failed — 모든 배열 빈 상태
+all_failed = {
+    "role": "보안 감사관",
+    "status": "all_agents_failed",
+    "error": "all agents failed: claude=timeout, codex=cli missing, gemini=rate limit",
+    "consensus_findings": [],
+    "consensus_ideas": [],
+    "contradictions": []
+}
+
+# 샘플 2: consolidator_failed — raw passthrough (1/3 단독 findings 여러 건)
+consolidator_failed = {
+    "role": "백엔드 아키텍트",
+    "status": "consolidator_failed",
+    "error": "consolidator retry exhausted after 2 attempts",
+    "consensus_findings": [
+        {
+            "severity": "High",
+            "title": "SQL injection in /users",
+            "file": "app.py",
+            "line_start": 42,
+            "line_end": 45,
+            "code_snippet": "cursor.execute(q)",
+            "evidence": "user input concat",
+            "agreement": "1/3",
+            "confidence": "medium",
+            "unique_source": "claude",
+            "contradiction": False,
+            "severity_votes": {"claude": "High"}
+        },
+        {
+            "severity": "High",
+            "title": "SQL injection in /users",
+            "file": "app.py",
+            "line_start": 42,
+            "line_end": 45,
+            "code_snippet": "cursor.execute(q)",
+            "evidence": "same spot flagged independently",
+            "agreement": "1/3",
+            "confidence": "medium",
+            "unique_source": "codex",
+            "contradiction": False,
+            "severity_votes": {"codex": "High"}
+        }
+    ],
+    "consensus_ideas": [
+        {
+            "title": "Add parameterized query linter",
+            "difficulty": "low",
+            "impact": "medium",
+            "detail": "catch string-concat SQL",
+            "proposers": ["gemini"]
+        }
+    ],
+    "contradictions": []
+}
+
+# 샘플 3: downgraded — 2중 모드, 2/2 agreement
+downgraded = {
+    "role": "성능 엔지니어",
+    "status": "downgraded",
+    "error": "codex unavailable",
+    "consensus_findings": [
+        {
+            "severity": "Medium",
+            "title": "N+1 in list endpoint",
+            "file": "views.py",
+            "line_start": 10,
+            "line_end": 18,
+            "code_snippet": "for u in users: u.profile",
+            "evidence": "ORM lazy load per row",
+            "agreement": "2/2",
+            "confidence": "high",
+            "contradiction": False,
+            "severity_votes": {"claude": "Medium", "gemini": "Medium"}
+        }
+    ],
+    "consensus_ideas": [],
+    "contradictions": []
+}
+
+for name, doc in [("all_agents_failed", all_failed),
+                  ("consolidator_failed", consolidator_failed),
+                  ("downgraded", downgraded)]:
+    try:
+        jsonschema.validate(doc, schema)
+    except jsonschema.ValidationError as e:
+        print(f"shape {name} rejected: {e.message}", file=sys.stderr)
+        sys.exit(1)
+
+# 또한 필수 shape 위반(consensus_ideas 누락) 샘플이 거부되는지 확인
+broken = {
+    "role": "x",
+    "status": "all_agents_failed",
+    "consensus_findings": [],
+    "contradictions": []
+}
+try:
+    jsonschema.validate(broken, schema)
+    print("broken shape (missing consensus_ideas) was accepted", file=sys.stderr)
+    sys.exit(2)
+except jsonschema.ValidationError:
+    pass
+
+# status enum 위반도 거부되는지 확인
+bad_status = {
+    "role": "x",
+    "status": "partial_success",
+    "consensus_findings": [],
+    "consensus_ideas": [],
+    "contradictions": []
+}
+try:
+    jsonschema.validate(bad_status, schema)
+    print("bad status enum was accepted", file=sys.stderr)
+    sys.exit(3)
+except jsonschema.ValidationError:
+    pass
+
+sys.exit(0)
+PYEOF
+    local rc=$?
+    if [ $rc -eq 0 ]; then
+        _pass "Ultra failure shape schema-valid"
+    else
+        _fail "Ultra failure shape schema-valid" "rc=$rc"
+    fi
 }
 
 # === Test 3: cross-verification-schema.json ===
@@ -170,13 +345,22 @@ test_ultra_consolidation_schema
 test_cross_verification_schema
 test_codemap_schema
 test_verification_schema
+test_ultra_failure_shapes
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Total: $((PASS+FAIL)) | Passed: $PASS | Failed: $FAIL"
+echo "  Total: $((PASS+FAIL+SKIPPED)) | Passed: $PASS | Failed: $FAIL | Skipped: $SKIPPED"
 if [ "$FAIL" != "0" ]; then
     echo "  Failed tests:"
     for t in "${FAILED[@]}"; do echo "    - $t"; done
 fi
+if [ "$SKIPPED" != "0" ]; then
+    echo "  ⚠️  ${SKIPPED}건 SKIP (degraded mode) — semantic validation 미수행."
+    echo "     strict mode 재실행: pip install --user jsonschema && bash $0"
+fi
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# 종료 코드:
+#   0 = 전원 PASS (또는 PASS + 일부 SKIP, 0 FAIL)
+#   1 = 1건 이상 FAIL
+# SKIP만으로는 exit 0 허용 (opt-in 상태이므로) — 단, 상단 경고 출력됨
 [ "$FAIL" = "0" ] && exit 0 || exit 1

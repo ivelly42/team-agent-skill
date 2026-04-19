@@ -4,11 +4,21 @@
   "description": "Phase 2.5 Ultra 모드에서 역할별 통합자(consolidator)가 반환하는 JSON 구조. 3중(Claude/Codex/Gemini) 에이전트 결과를 합의도 기반으로 병합한 결과를 담는다.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["role", "consensus_findings"],
+  "required": ["role", "consensus_findings", "consensus_ideas", "contradictions", "status"],
   "properties": {
     "role": {
       "type": "string",
       "description": "통합 대상 역할 이름 (예: '보안 감사관', '백엔드 아키텍트')"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "all_agents_failed", "consolidator_failed", "downgraded"],
+      "description": "통합 실행 경로. ok=정상, all_agents_failed=3중 모두 실패(빈 배열), consolidator_failed=통합자 실패로 raw passthrough, downgraded=2중만 가용."
+    },
+    "error": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "status != ok 일 때 실패 원인을 기록하는 짧은 설명. ok 경로에선 존재하지 않는다."
     },
     "consensus_findings": {
       "type": "array",

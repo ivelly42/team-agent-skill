@@ -67,30 +67,169 @@ verdict: "confirmed" | "disagree_severity" | "not_an_issue"
 suggested_severity: "Critical" | "High" | "Medium" | "Low" | "Info"
 ```
 
-## 실행 (동시 독립)
+## 실행 (동시 독립 + 포터블 timeout + per-process 폴백 매트릭스)
+
+검증 대상 JSON과 프롬프트를 Write 도구로 먼저 저장한 뒤 아래 bash 블록을 실행한다.
+사전 저장 경로:
+- `/tmp/ta-${_RUN_ID}-verify-input.json`
+- `/tmp/ta-${_RUN_ID}-codex-verify-prompt.txt`
+- `/tmp/ta-${_RUN_ID}-gemini-verify-prompt.txt`
 
 ```bash
-# 검증 대상 JSON을 Write 도구로 먼저 저장
-# /tmp/ta-${_RUN_ID}-verify-input.json 및 codex/gemini 프롬프트 각각 저장
+# ───────────────────────────────────────────────────────────
+# 1. 포터블 timeout 래퍼 탐지 (macOS 호환)
+# ───────────────────────────────────────────────────────────
+_TIMEOUT_BIN=""
+if command -v timeout >/dev/null 2>&1; then
+  _TIMEOUT_BIN="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+  _TIMEOUT_BIN="gtimeout"
+else
+  echo "[team-agent WARN] timeout/gtimeout 미발견 — 무한 대기 위험. brew install coreutils 권장." >&2
+fi
 
-# Codex 검증자 (run_in_background)
-codex exec - -s read-only -C "$_EXEC_DIR" \
-  --output-schema "${SKILL_DIR}/refs/cross-verification-schema.json" \
-  -o "/tmp/ta-${_RUN_ID}-codex-verdicts.json" \
-  --skip-git-repo-check < "/tmp/ta-${_RUN_ID}-codex-verify-prompt.txt" &
-CODEX_PID=$!
+# SIGTERM → 30초 grace → SIGKILL. 래퍼 없으면 직접 실행.
+_run_with_timeout() {
+  # $1=secs, $2=grace_secs, $@=cmd...
+  local _secs="$1"; shift
+  local _grace="$1"; shift
+  if [ -n "$_TIMEOUT_BIN" ]; then
+    "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"
+  else
+    "$@"
+  fi
+}
 
-# Gemini 검증자 (run_in_background)
-gemini -m gemini-3.1-pro-preview --json-schema "${SKILL_DIR}/refs/cross-verification-schema.json" \
-  -p - < "/tmp/ta-${_RUN_ID}-gemini-verify-prompt.txt" \
-  > "/tmp/ta-${_RUN_ID}-gemini-verdicts.json" 2>/dev/null &
-GEMINI_PID=$!
+# ───────────────────────────────────────────────────────────
+# 2. per-process 경로 정의
+# ───────────────────────────────────────────────────────────
+_CODEX_OUT="/tmp/ta-${_RUN_ID}-codex-verdicts.json"
+_GEMINI_OUT="/tmp/ta-${_RUN_ID}-gemini-verdicts.json"
+_CODEX_RC_FILE="/tmp/ta-${_RUN_ID}-codex.rc"
+_GEMINI_RC_FILE="/tmp/ta-${_RUN_ID}-gemini.rc"
+_CODEX_LOG="/tmp/ta-${_RUN_ID}-codex.log"
+_GEMINI_LOG="/tmp/ta-${_RUN_ID}-gemini.log"
 
-# 타임아웃 5분
-wait $CODEX_PID $GEMINI_PID
+: > "$_CODEX_OUT"; : > "$_GEMINI_OUT"
+rm -f "$_CODEX_RC_FILE" "$_GEMINI_RC_FILE"
+
+_START_TS=$(date +%s)
+
+# ───────────────────────────────────────────────────────────
+# 3. Codex 검증자 (서브셸로 rc 캡처)
+# ───────────────────────────────────────────────────────────
+(
+  _run_with_timeout 300 30 \
+    codex exec - -s read-only -C "$_EXEC_DIR" \
+      --output-schema "${_SKILL_DIR}/refs/cross-verification-schema.json" \
+      -o "$_CODEX_OUT" \
+      --skip-git-repo-check \
+      < "/tmp/ta-${_RUN_ID}-codex-verify-prompt.txt" \
+      > "$_CODEX_LOG" 2>&1
+  echo $? > "$_CODEX_RC_FILE"
+) &
+_CODEX_PID=$!
+
+# ───────────────────────────────────────────────────────────
+# 4. Gemini 검증자 (서브셸로 rc 캡처)
+# ───────────────────────────────────────────────────────────
+(
+  _run_with_timeout 300 30 \
+    gemini -m gemini-3.1-pro-preview \
+      --json-schema "${_SKILL_DIR}/refs/cross-verification-schema.json" \
+      -p - < "/tmp/ta-${_RUN_ID}-gemini-verify-prompt.txt" \
+      > "$_GEMINI_OUT" 2> "$_GEMINI_LOG"
+  echo $? > "$_GEMINI_RC_FILE"
+) &
+_GEMINI_PID=$!
+
+# ───────────────────────────────────────────────────────────
+# 5. 대기 — timeout은 각 서브셸이 자체 처리. wait는 blocking-safe.
+# ───────────────────────────────────────────────────────────
+wait "$_CODEX_PID" 2>/dev/null
+wait "$_GEMINI_PID" 2>/dev/null
+
+_END_TS=$(date +%s)
+_DURATION_SEC=$((_END_TS - _START_TS))
+
+# rc 파일 없으면 (서브셸 자체 실패) 124 간주
+_CODEX_RC=$(cat "$_CODEX_RC_FILE" 2>/dev/null || echo 124)
+_GEMINI_RC=$(cat "$_GEMINI_RC_FILE" 2>/dev/null || echo 124)
+
+# ───────────────────────────────────────────────────────────
+# 6. 3단계 검증 (rc == 0 && non-empty && json parseable)
+# ───────────────────────────────────────────────────────────
+_validate_verdict() {
+  # $1=rc, $2=out_file → stdout: "ok" | "timeout" | "non_zero_rc" | "empty_output" | "invalid_json"
+  local _rc="$1" _out="$2"
+  if [ "$_rc" = "124" ] || [ "$_rc" = "137" ]; then
+    echo "timeout"; return 1
+  fi
+  if [ "$_rc" != "0" ]; then
+    echo "non_zero_rc"; return 1
+  fi
+  if [ ! -s "$_out" ]; then
+    echo "empty_output"; return 1
+  fi
+  if ! python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$_out" >/dev/null 2>&1; then
+    echo "invalid_json"; return 1
+  fi
+  echo "ok"; return 0
+}
+
+_CODEX_REASON=$(_validate_verdict "$_CODEX_RC" "$_CODEX_OUT") && _CODEX_OK=1 || _CODEX_OK=0
+_GEMINI_REASON=$(_validate_verdict "$_GEMINI_RC" "$_GEMINI_OUT") && _GEMINI_OK=1 || _GEMINI_OK=0
+
+# ok면 reason은 null로 기록
+[ "$_CODEX_OK" = "1" ]  && _CODEX_FAILED_REASON="null"  || _CODEX_FAILED_REASON="\"$_CODEX_REASON\""
+[ "$_GEMINI_OK" = "1" ] && _GEMINI_FAILED_REASON="null" || _GEMINI_FAILED_REASON="\"$_GEMINI_REASON\""
+
+# ───────────────────────────────────────────────────────────
+# 7. Fallback 매트릭스 (mode 결정 + WARN 로그)
+# ───────────────────────────────────────────────────────────
+if   [ "$_CODEX_OK" = "1" ] && [ "$_GEMINI_OK" = "1" ]; then
+  _VERIFICATION_MODE="full_3way"
+elif [ "$_CODEX_OK" = "1" ] && [ "$_GEMINI_OK" = "0" ]; then
+  _VERIFICATION_MODE="codex_only"
+  echo "[team-agent WARN] Gemini 검증 실패 (reason=$_GEMINI_REASON, rc=$_GEMINI_RC) — Codex 단독 판정으로 진행" >&2
+elif [ "$_CODEX_OK" = "0" ] && [ "$_GEMINI_OK" = "1" ]; then
+  _VERIFICATION_MODE="gemini_only"
+  echo "[team-agent WARN] Codex 검증 실패 (reason=$_CODEX_REASON, rc=$_CODEX_RC) — Gemini 단독 판정으로 진행" >&2
+else
+  _VERIFICATION_MODE="skipped"
+  echo "[team-agent WARN] Codex+Gemini 모두 검증 실패 (codex=$_CODEX_REASON/$_CODEX_RC, gemini=$_GEMINI_REASON/$_GEMINI_RC) — Claude 원본 채택" >&2
+fi
+
+# ───────────────────────────────────────────────────────────
+# 8. manifest.verification 조각 저장 (Phase 4-A-2에서 병합)
+# ───────────────────────────────────────────────────────────
+cat > "/tmp/ta-${_RUN_ID}-verification-meta.json" <<EOF
+{
+  "mode": "$_VERIFICATION_MODE",
+  "codex_rc": $_CODEX_RC,
+  "gemini_rc": $_GEMINI_RC,
+  "codex_failed_reason": $_CODEX_FAILED_REASON,
+  "gemini_failed_reason": $_GEMINI_FAILED_REASON,
+  "duration_sec": $_DURATION_SEC
+}
+EOF
+
+export _VERIFICATION_MODE _CODEX_OK _GEMINI_OK _CODEX_RC _GEMINI_RC _DURATION_SEC
 ```
 
-독립성 보장: 두 검증자는 서로 결과를 보지 못한다. 동일 입력, 별도 프로세스.
+독립성 보장: 두 검증자는 서로 결과를 보지 못한다. 동일 입력, 별도 서브셸 프로세스, 각자 timeout 래퍼.
+
+## Fallback 매트릭스 (실행 가능 구현)
+
+| `_CODEX_OK` | `_GEMINI_OK` | `mode`         | 동작                                                     | 사용자 출력 문구                                       |
+|-------------|--------------|----------------|----------------------------------------------------------|--------------------------------------------------------|
+| 1           | 1            | `full_3way`    | 기존 3/3·2/3 합의 로직 (아래 Python `consensus`)         | "검증 통계" 테이블 정상 표시                           |
+| 1           | 0            | `codex_only`   | Codex 단독 판정 — Python `consensus`에 `gemini=None` 주입 | `⚠️ Gemini 검증 실패 — Codex 단독 판정 ("2/3 불가")`   |
+| 0           | 1            | `gemini_only`  | Gemini 단독 판정 — Python `consensus`에 `codex=None` 주입 | `⚠️ Codex 검증 실패 — Gemini 단독 판정 ("2/3 불가")`   |
+| 0           | 0            | `skipped`      | 검증 전체 스킵 → Claude 원본 findings 그대로 채택        | `❌ 두 검증자 모두 실패 — Claude 원본 채택 (검증 실패)` |
+
+`codex_failed_reason` / `gemini_failed_reason` enum:
+`"timeout"` | `"non_zero_rc"` | `"empty_output"` | `"invalid_json"` | `null` (성공 시)
 
 ## 2/3 다수결 매핑 (결정론적)
 
@@ -171,19 +310,20 @@ def consensus(claude_sev, codex_verdict, gemini_verdict):
 
 ## 검증 실패 폴백
 
-| 실패 | 동작 |
-|-----|------|
-| Codex 타임아웃/실패 | Gemini 단독 결과 + "2/3 불가 — Gemini 단독 판정" 표시 |
-| Gemini 타임아웃/실패 | Codex 단독 결과 + 동일 표시 |
-| 둘 다 실패 | 검증 전체 스킵. Claude 원본 채택 + "검증 실패" 경고 |
-| JSON 파싱 실패 | 해당 검증자만 제외. 단독 모드 전환 |
+상세 실행 매트릭스는 위 "Fallback 매트릭스 (실행 가능 구현)" 섹션 참조.
+실패 분류는 `_validate_verdict` 함수의 3단계 검증(rc == 0 / non-empty / json parseable)에서 나온 enum을 그대로 `manifest.verification.{codex,gemini}_failed_reason`에 기록한다.
 
 ## manifest 기록
 
 ```json
 {
   "verification": {
-    "mode": "cross",
+    "mode": "full_3way",
+    "codex_rc": 0,
+    "gemini_rc": 0,
+    "codex_failed_reason": null,
+    "gemini_failed_reason": null,
+    "duration_sec": 187,
     "codex_verdicts": [
       {"finding_id": "f-001", "verdict": "confirmed"}
     ],
@@ -196,3 +336,23 @@ def consensus(claude_sev, codex_verdict, gemini_verdict):
   }
 }
 ```
+
+폴백 모드 예시 (`codex_only` — Gemini 타임아웃):
+
+```json
+{
+  "verification": {
+    "mode": "codex_only",
+    "codex_rc": 0,
+    "gemini_rc": 124,
+    "codex_failed_reason": null,
+    "gemini_failed_reason": "timeout",
+    "duration_sec": 330,
+    "codex_verdicts": [...],
+    "gemini_verdicts": [],
+    "consensus": [...]
+  }
+}
+```
+
+`mode` enum: `"full_3way"` | `"codex_only"` | `"gemini_only"` | `"skipped"`.

@@ -5,6 +5,11 @@
   "additionalProperties": false,
   "required": ["verifications"],
   "properties": {
+    "verification_mode": {
+      "type": "string",
+      "enum": ["full_3way", "codex_only", "gemini_only", "skipped"],
+      "description": "Populated by the team-agent driver after fallback matrix evaluation — verifier CLIs do not emit this field themselves."
+    },
     "verifications": {
       "type": "array",
       "items": {

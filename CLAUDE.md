@@ -21,4 +21,4 @@
 ```
 
 ## Current Status
-[2026-04-20] 4차 Ultra 분석 완료 (Claude 5 + Gemini 5 = 10 에이전트, 2중 합의). 2/2 합의 22건 / 1/2 unique 32건. P0 4건(C2 _SKILL_DIR 일원화·C3 encoding='utf-8'·C4 with open·C7 schema validation test) 65분 내 적용 가능. 리포트: docs/team-agent/2026-04-20-003014-ultra-analysis-report.md.
+[2026-04-20] Codex adversarial finding #1 수정: `refs/cross-verification.md` 실행 블록에 포터블 timeout 래퍼 + per-process rc 캡처 + 3단계 검증(rc/empty/json) + 4-way fallback 매트릭스(full_3way/codex_only/gemini_only/skipped) 구현. `manifest.verification`에 mode·rc·failed_reason·duration_sec 필드 추가. 스키마에 verification_mode enum 추가, SKILL.md Phase 4-A-2 폴백 서술 동기화.
