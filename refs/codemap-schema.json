@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "team-agent shared codemap",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "generated_at", "project", "entrypoints", "files", "symbols", "dependencies"],
+  "properties": {
+    "version": { "const": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "backend": { "type": "string", "enum": ["gemini", "codex", "claude"] },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "root", "stack", "src_count", "test_count"],
+      "properties": {
+        "name": { "type": "string" },
+        "root": { "type": "string" },
+        "stack": { "type": "array", "items": { "type": "string" } },
+        "src_count": { "type": "integer", "minimum": 0 },
+        "test_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "entrypoints": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "path"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["main", "api-route", "cli", "worker", "test-runner", "build", "config"] },
+          "path": { "type": "string" },
+          "description": { "type": "string", "maxLength": 200 }
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "lang", "loc", "role"],
+        "properties": {
+          "path": { "type": "string" },
+          "lang": { "type": "string" },
+          "loc": { "type": "integer", "minimum": 0 },
+          "role": { "type": "string", "enum": ["core", "api", "ui", "config", "test", "util", "doc", "other"] },
+          "exports": { "type": "array", "items": { "type": "string" }, "maxItems": 20 }
+        }
+      }
+    },
+    "symbols": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "kind", "file", "line"],
+        "properties": {
+          "name": { "type": "string" },
+          "kind": { "type": "string", "enum": ["class", "function", "type", "interface", "const", "route"] },
+          "file": { "type": "string" },
+          "line": { "type": "integer", "minimum": 1 },
+          "signature": { "type": "string", "maxLength": 200 }
+        }
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to"],
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" }
+        }
+      }
+    },
+    "hotspots": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "reason"],
+        "properties": {
+          "path": { "type": "string" },
+          "reason": { "type": "string", "maxLength": 150 }
+        }
+      }
+    }
+  }
+}
