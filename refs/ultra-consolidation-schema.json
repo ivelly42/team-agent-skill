@@ -1,0 +1,162 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ultra-mode per-role consolidation output",
+  "description": "Phase 2.5 Ultra 모드에서 역할별 통합자(consolidator)가 반환하는 JSON 구조. 3중(Claude/Codex/Gemini) 에이전트 결과를 합의도 기반으로 병합한 결과를 담는다.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["role", "consensus_findings"],
+  "properties": {
+    "role": {
+      "type": "string",
+      "description": "통합 대상 역할 이름 (예: '보안 감사관', '백엔드 아키텍트')"
+    },
+    "consensus_findings": {
+      "type": "array",
+      "description": "3중 에이전트 결과를 합의도로 병합한 발견 목록",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "severity",
+          "title",
+          "file",
+          "line_start",
+          "line_end",
+          "code_snippet",
+          "evidence",
+          "agreement",
+          "confidence",
+          "contradiction"
+        ],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["Critical", "High", "Medium", "Low", "Info"]
+          },
+          "title": { "type": "string" },
+          "file": { "type": "string" },
+          "line_start": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "line_end": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "code_snippet": { "type": "string" },
+          "evidence": { "type": "string" },
+          "agreement": {
+            "type": "string",
+            "enum": ["3/3", "2/3", "1/3", "2/2", "1/2", "1/1"],
+            "description": "합의도 라벨. 3중 입력이 모두 성공한 경우 3/3·2/3·1/3, 2중 축소 입력은 2/2·1/2, 단독 입력(일부 에이전트 실패)은 1/1."
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          },
+          "unique_source": {
+            "type": ["string", "null"],
+            "enum": ["claude", "codex", "gemini", null],
+            "description": "1/3 또는 1/2 등 단독 발견인 경우 어느 에이전트가 찾았는지 기록"
+          },
+          "contradiction": {
+            "type": "boolean",
+            "description": "동일 위치를 2명 이상이 보고했으나 severity 차이가 2단계 이상일 때 true"
+          },
+          "severity_votes": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "각 에이전트의 severity 투표 기록",
+            "properties": {
+              "claude": {
+                "type": "string",
+                "enum": ["Critical", "High", "Medium", "Low", "Info"]
+              },
+              "codex": {
+                "type": "string",
+                "enum": ["Critical", "High", "Medium", "Low", "Info"]
+              },
+              "gemini": {
+                "type": "string",
+                "enum": ["Critical", "High", "Medium", "Low", "Info"]
+              }
+            }
+          },
+          "action": { "type": "string" },
+          "category": {
+            "type": "string",
+            "enum": [
+              "security",
+              "performance",
+              "quality",
+              "architecture",
+              "testing",
+              "integration",
+              "ai-data",
+              "api-contract",
+              "other"
+            ]
+          }
+        }
+      }
+    },
+    "consensus_ideas": {
+      "type": "array",
+      "description": "3중 에이전트 아이디어를 병합한 목록",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "difficulty", "impact", "detail"],
+        "properties": {
+          "title": { "type": "string" },
+          "difficulty": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          },
+          "impact": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          },
+          "detail": { "type": "string" },
+          "proposers": {
+            "type": "array",
+            "description": "해당 아이디어를 제안한 에이전트 목록",
+            "items": {
+              "type": "string",
+              "enum": ["claude", "codex", "gemini"]
+            }
+          }
+        }
+      }
+    },
+    "contradictions": {
+      "type": "array",
+      "description": "동일 위치·이슈에 대해 severity가 크게 엇갈린 항목 목록 (사람 판단 위임용)",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["location", "issue", "reason"],
+        "properties": {
+          "location": {
+            "type": "string",
+            "description": "'file.ts:42' 형식의 위치 표기"
+          },
+          "issue": { "type": "string" },
+          "claude_severity": {
+            "type": ["string", "null"],
+            "enum": ["Critical", "High", "Medium", "Low", "Info", null]
+          },
+          "codex_severity": {
+            "type": ["string", "null"],
+            "enum": ["Critical", "High", "Medium", "Low", "Info", null]
+          },
+          "gemini_severity": {
+            "type": ["string", "null"],
+            "enum": ["Critical", "High", "Medium", "Low", "Info", null]
+          },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

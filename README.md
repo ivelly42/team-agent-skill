@@ -109,10 +109,13 @@ flowchart TB
 | `--resume <RUN_ID>` | 실패한 에이전트만 재실행 |
 | `--codex [all\|hybrid]` | Claude+GPT 하이브리드 팀 (`--gemini`·`--cross`와 상호 배타) |
 | `--gemini [all\|hybrid]` | Claude+Gemini 3.1 Flash-Lite 하이브리드 팀 (`--codex`·`--cross`와 상호 배타) |
-| `--cross` | Claude+Codex+Gemini 3-way 팀 + 3중 독립 검증 (최고 정확도) |
+| `--cross` | Claude+Codex+Gemini 3-way 팀 + 3중 독립 검증 |
+| `--ultra` | 각 역할에 Claude+Codex+Gemini 3중 복제 + Phase 2.5 Opus 역할별 통합 (최고 정밀도, 3~4배 비용) |
 | `--notify telegram` | 완료 시 텔레그램 알림 |
 | `--dry-run` | 팀 구성/프롬프트만 미리보기 |
 | `update` | 스킬 최신 버전으로 업데이트 |
+
+> **`--cross` vs `--ultra`**: cross는 **분산**(역할별 서로 다른 모델) + 2/3 독립 검증. ultra는 **복제**(같은 역할을 3모델이 병렬) + 역할별 Opus 통합자가 3/3·2/3·1/3 합의와 모순 감지. 프로덕션 릴리스 감사처럼 최고 정밀도가 필요할 때 ultra, 비용 효율적 교차 검증이 필요할 때 cross.
 
 ---
 
@@ -207,7 +210,8 @@ git clone https://github.com/ivelly42/team-agent-skill.git ^
 /team-agent --dry-run 성능 최적화       # 팀 구성 미리보기 (실행 안 함)
 /team-agent --gemini 코드 리뷰             # Gemini 하이브리드
 /team-agent --gemini all 보안 점검         # 전원 Gemini (최저가)
-/team-agent --cross 전체 감사              # 3-way + 3중 검증 (최고 정확도)
+/team-agent --cross 전체 감사              # 3-way + 3중 검증
+/team-agent --ultra 프로덕션 릴리스 감사    # 역할당 3중 복제 + Opus 역할별 통합 (최고 정밀도)
 /team-agent update                      # 스킬 최신 버전으로 업데이트
 ```
 
@@ -408,7 +412,7 @@ docs/team-agent/
 ├── {RUN_ID}-{slug}-report.md      # 상세 보고서
 ├── {RUN_ID}-{slug}-handoff.md     # 다른 AI 전달용 요약
 ├── {RUN_ID}-codemap.json          # 공유 코드맵 (Phase 0.3에서 생성, 전 에이전트 재활용)
-├── .runs/{RUN_ID}.json            # 실행 manifest (schema v3)
+├── .runs/{RUN_ID}.json            # 실행 manifest (schema v4)
 └── .history.jsonl                 # 실행 히스토리 (append-only)
 ```
 
@@ -436,7 +440,7 @@ team-agent/
 │   └── verification-schema.json            # Codex 검증 구조화 JSON Schema
 └── docs/team-agent/                        # 실행 결과 (권장: .gitignore)
     ├── {RUN_ID}-codemap.json               # 공유 코드맵 (Phase 0.3 산출)
-    ├── .runs/                              # manifest 저장소 (schema v3)
+    ├── .runs/                              # manifest 저장소 (schema v4)
     └── .history.jsonl                      # 히스토리
 ```
 
