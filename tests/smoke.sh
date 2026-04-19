@@ -200,16 +200,22 @@ test_grep_batch_args() {
 }
 
 # ───────────────────────────────────────────────────────────
-# Test 8: 모든 backend CLI 호출 (codex exec, gemini -p) 이 _run_with_timeout으로 launch됨
+# Test 8: 모든 backend CLI 호출이 _run_with_timeout의 direct child argv로 launch됨
 # ───────────────────────────────────────────────────────────
-# Codex 7차 adversarial이 재지적한 허점 해결:
-#   (a) 이전 버전: 블록에 wrapper 호출 1개만 있으면 같은 블록의 unwrapped call도 통과
-#   (b) 이전 버전: `FOO=1 timeout 300 codex exec`, `env timeout ...` 등 prefix 형태 놓침
-# 새 규칙: bash 블록을 shell command 단위로 split한 뒤, backend CLI가 등장하는 각
-# command의 "첫 실행 토큰(variable assignment prefix 제외)"이 `_run_with_timeout`
-# 여야만 한다. `timeout`/`gtimeout`/`env`/`codex`/`gemini` 등 다른 값이면 violation.
+# Codex 8차 [medium] nested shell wrapper 허점 해결:
+#   이전 버전은 `_run_with_timeout 300 30 bash -lc 'codex exec ...'`처럼 bash/sh/env
+#   interpreter로 한 겹 감싼 호출을 통과시킴. 이 경우 _run_with_timeout이 launch하는
+#   process는 bash이고 codex는 nested shell 안에서 re-parse되므로 실제로는
+#   stdin/signal/exit-code 불변량이 깨진다.
+# 새 규칙:
+#   1) bash 블록을 shell command 단위로 split (quote/escape/continuation 처리)
+#   2) CLI substring이 quoted literal 안에만 있으면 스킵 (따옴표 밖 매치만 violation)
+#   3) command의 첫 실행 토큰이 `_run_with_timeout`이어야 하고
+#   4) 토큰 레이아웃 = `_run_with_timeout <secs> <grace> <child>` 에서
+#      child가 `codex`(+ `exec`) 또는 `gemini`여야 함
+#   5) child가 bash/sh/zsh/env/python3/node 등 interpreter wrapper면 violation
 test_backend_calls_timeout_guarded() {
-    local name="unwrapped backend CLI 감지 (command-level state machine)"
+    local name="backend CLI → _run_with_timeout direct child (argv state machine)"
     local files=("$SKILL_DIR/SKILL.md" "$SKILL_DIR/refs/codex-verification.md" \
                  "$SKILL_DIR/refs/cross-verification.md" "$SKILL_DIR/refs/gemini-verification.md")
 
@@ -217,21 +223,17 @@ test_backend_calls_timeout_guarded() {
 import re, sys
 files = sys.argv[1:]
 
-# backend CLI invocation (argv로 실제 실행되는 형태)
 CLI_RE = re.compile(r'\b(codex\s+exec|gemini\s+(?:-m\s+\S+\s+)?(?:--json-schema\s+\S+\s+)?-p)\b')
-# 허용되는 유일한 launcher
 ALLOWED_LAUNCHER = '_run_with_timeout'
+ALLOWED_CHILDREN = {'codex', 'gemini'}
 
 violations = []
 
 def extract_bash_blocks(lines):
-    blocks = []
-    in_bash = False
-    block_start = 0
-    block_lines = []
+    blocks, in_bash, block_start, block_lines = [], False, 0, []
     for i, ln in enumerate(lines, 1):
         if ln.strip().startswith('```bash'):
-            in_bash = True; block_start = i; block_lines = []
+            in_bash, block_start, block_lines = True, i, []
             continue
         if in_bash and ln.strip() == '```':
             blocks.append((block_start, block_lines))
@@ -241,15 +243,33 @@ def extract_bash_blocks(lines):
             block_lines.append((i, ln))
     return blocks
 
+def strip_quoted_regions(text):
+    """따옴표 안의 내용을 공백으로 치환한 버전 반환.
+    escape(\\X)는 X를 literal로 취급. CLI substring이 따옴표 안에만 있으면
+    이 함수 리턴값에는 매치되지 않아 false positive 제거."""
+    out = []
+    j, n = 0, len(text)
+    in_single = in_double = False
+    while j < n:
+        ch = text[j]
+        if ch == '\\' and j + 1 < n and (in_single or in_double or not (in_single or in_double)):
+            out.append(' '); out.append(' ')
+            j += 2
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            out.append(' '); j += 1; continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            out.append(' '); j += 1; continue
+        if in_single or in_double:
+            out.append(' ')
+        else:
+            out.append(ch)
+        j += 1
+    return ''.join(out)
+
 def split_commands(block_lines):
-    """bash 블록을 논리적 shell command 단위로 쪼갠다.
-    처리:
-      - `#`로 시작하는 주석 줄 제거
-      - `\\` 라인 끝 continuation 병합
-      - 따옴표 밖 `;`, `&&`, `||`, `|`, `&`에서 분할
-      - backslash escape 존중
-      - python heredoc `'...'` 내부의 단일 따옴표도 literal로 취급
-    """
     processed = []
     for lineno, raw in block_lines:
         s = raw.rstrip('\n')
@@ -257,7 +277,6 @@ def split_commands(block_lines):
             continue
         processed.append((lineno, s))
 
-    # line continuation 병합
     merged = []
     i = 0
     while i < len(processed):
@@ -273,22 +292,17 @@ def split_commands(block_lines):
     for lineno, text in merged:
         buf = ''
         j = 0
-        in_single = False
-        in_double = False
+        in_single = in_double = False
         pieces = []
         n = len(text)
         while j < n:
             ch = text[j]
             if ch == '\\' and j + 1 < n:
-                buf += ch + text[j+1]
-                j += 2
-                continue
+                buf += ch + text[j+1]; j += 2; continue
             if ch == "'" and not in_double:
-                in_single = not in_single
-                buf += ch; j += 1; continue
+                in_single = not in_single; buf += ch; j += 1; continue
             if ch == '"' and not in_single:
-                in_double = not in_double
-                buf += ch; j += 1; continue
+                in_double = not in_double; buf += ch; j += 1; continue
             if not in_single and not in_double:
                 if ch == ';':
                     pieces.append(buf); buf = ''; j += 1; continue
@@ -308,16 +322,35 @@ def split_commands(block_lines):
                 commands.append((lineno, p.strip()))
     return commands
 
-def first_executable(cmd_text):
-    """variable assignment / 관용 modifier를 건너뛴 첫 실행 토큰."""
-    tokens = cmd_text.split()
-    # 관용 modifier / 서브셸 진입 토큰 skip
+def strip_leading_modifiers(tokens):
     while tokens and tokens[0] in ('!', 'time', '(', '((', '{', 'exec', 'eval'):
         tokens = tokens[1:]
-    # variable assignment prefix (VAR=VAL) skip
     while tokens and re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', tokens[0]):
         tokens = tokens[1:]
-    return tokens[0] if tokens else None
+    return tokens
+
+def validate_wrapped(cmd_text):
+    """`_run_with_timeout <secs> <grace> <child> ...` 형태 검증.
+    Returns: (ok: bool, reason: str)"""
+    tokens = strip_leading_modifiers(cmd_text.split())
+    if not tokens:
+        return False, "empty command"
+    if tokens[0] != ALLOWED_LAUNCHER:
+        return False, f"launcher={tokens[0]!r} (must be _run_with_timeout)"
+    if len(tokens) < 4:
+        return False, f"argv too short: {tokens[:3]}"
+    # tokens[1]=secs, tokens[2]=grace, tokens[3]=child
+    child = tokens[3]
+    # child는 variable assignment 아니어야 함 (wrapper argv는 pure exec)
+    if re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', child):
+        return False, f"child assignment not allowed: {child!r}"
+    if child == 'codex':
+        if len(tokens) < 5 or tokens[4] != 'exec':
+            return False, f"codex without 'exec' subcommand: {tokens[4] if len(tokens) >= 5 else '<none>'}"
+        return True, None
+    if child == 'gemini':
+        return True, None
+    return False, f"child={child!r} (must be codex/gemini, not interpreter wrapper)"
 
 for path in files:
     try:
@@ -328,19 +361,16 @@ for path in files:
 
     for block_start, block_lines in extract_bash_blocks(lines):
         for cmd_lineno, cmd in split_commands(block_lines):
-            if not CLI_RE.search(cmd):
+            # 따옴표 밖에만 CLI가 있는지 확인
+            cmd_unquoted = strip_quoted_regions(cmd)
+            if not CLI_RE.search(cmd_unquoted):
                 continue
-            first = first_executable(cmd)
-            if first == ALLOWED_LAUNCHER:
-                continue
-            # first가 None 이면 단순 arg 전달 등 (거의 없음)
-            shown = first if first is not None else '<none>'
-            violations.append(
-                f"{path}:{cmd_lineno} first_exec={shown!r} :: {cmd[:140]}"
-            )
+            ok, reason = validate_wrapped(cmd)
+            if not ok:
+                violations.append(f"{path}:{cmd_lineno} {reason} :: {cmd[:140]}")
 
 if violations:
-    print(f"[test_8] {len(violations)} unwrapped backend invocation(s):", file=sys.stderr)
+    print(f"[test_8] {len(violations)} improperly-launched backend invocation(s):", file=sys.stderr)
     for v in violations: print(v, file=sys.stderr)
     sys.exit(1)
 sys.exit(0)
@@ -354,61 +384,80 @@ PYEOF
 }
 
 # ───────────────────────────────────────────────────────────
-# Test 9: timeout wrapper parity — 모든 인라인 복사본의 Python watchdog body가
-# canonical (refs/timeout-wrapper.sh)의 핵심 3요소를 포함해야 함.
-# Codex 7차 adversarial [medium] drift 해결.
+# Test 9: canonical byte-exact parity — refs/timeout-wrapper.sh의 Python watchdog
+# body와 모든 인라인 복사본을 byte-exact 비교. Codex 8차 [medium] 해결:
+# regex fragment 체크가 아니라 canonical function text를 source-of-truth로 사용.
 # ───────────────────────────────────────────────────────────
 test_timeout_wrapper_parity() {
-    local name="canonical ↔ 인라인 wrapper parity (핵심 불변량)"
-    local files=("$SKILL_DIR/SKILL.md" "$SKILL_DIR/refs/codex-verification.md" \
-                 "$SKILL_DIR/refs/cross-verification.md" "$SKILL_DIR/refs/gemini-verification.md" \
-                 "$SKILL_DIR/refs/timeout-wrapper.sh")
+    local name="canonical ↔ 인라인 wrapper byte-exact parity"
+    local canonical="$SKILL_DIR/refs/timeout-wrapper.sh"
+    local inlines=("$SKILL_DIR/SKILL.md" "$SKILL_DIR/refs/codex-verification.md" \
+                   "$SKILL_DIR/refs/cross-verification.md" "$SKILL_DIR/refs/gemini-verification.md")
 
-    python3 - "${files[@]}" <<'PYEOF'
-import re, sys
-files = sys.argv[1:]
+    python3 - "$canonical" "${inlines[@]}" <<'PYEOF'
+import hashlib, re, sys
+canonical_path = sys.argv[1]
+inline_paths = sys.argv[2:]
 
-# 모든 인라인 복사본이 반드시 포함해야 하는 불변량 (canonical의 의미론적 핵심).
-INVARIANTS = [
-    (r'\bif not cmd\b',                               'empty cmd guard'),
-    (r'cmd not found',                                'FileNotFoundError diagnostic'),
-    (r'124\s+if\s+rc\s+in\s+\(0,\s*-signal\.SIGTERM', 'SIGTERM exit normalization'),
-    (r'sys\.exit\(127\)',                             '127 on cmd not found'),
-    (r'sys\.exit\(137\)',                             '137 on SIGKILL'),
-    (r'start_new_session=True',                       'own process group'),
-    (r'stdin=sys\.stdin',                             'stdin inheritance'),
-]
-
-# 각 파일에서 python3 -c '...' literal 안의 body들을 추출
+# `python3 -c '\n...\n' "$_secs" "$_grace" "$@"` 형태의 body 추출
 PY_BODY_RE = re.compile(r"python3\s+-c\s+'\n(.*?)\n'\s*\"\$_secs\"", re.DOTALL)
 
-fail = []
-for path in files:
+try:
+    with open(canonical_path, encoding='utf-8') as f:
+        canonical_text = f.read()
+except FileNotFoundError:
+    print(f"FATAL: canonical missing: {canonical_path}", file=sys.stderr); sys.exit(2)
+
+canonical_bodies = PY_BODY_RE.findall(canonical_text)
+if not canonical_bodies:
+    print(f"FATAL: canonical has no python3 -c body: {canonical_path}", file=sys.stderr); sys.exit(2)
+canonical_body = canonical_bodies[0]
+canonical_hash = hashlib.sha256(canonical_body.encode()).hexdigest()[:12]
+
+violations = []
+total_bodies = 0
+for path in inline_paths:
     try:
         with open(path, encoding='utf-8') as f:
             text = f.read()
     except FileNotFoundError:
-        fail.append(f"{path}: file missing")
-        continue
+        violations.append(f"{path}: file missing"); continue
     bodies = PY_BODY_RE.findall(text)
     if not bodies:
-        fail.append(f"{path}: no inline python3 -c watchdog body found")
-        continue
+        violations.append(f"{path}: no inline python3 -c body found"); continue
     for idx, body in enumerate(bodies, 1):
-        for pat, label in INVARIANTS:
-            if not re.search(pat, body):
-                fail.append(f"{path} body#{idx}: missing invariant '{label}' (pattern: {pat})")
+        total_bodies += 1
+        if body != canonical_body:
+            body_hash = hashlib.sha256(body.encode()).hexdigest()[:12]
+            # 처음 달라지는 라인 3개만 간단히 표시
+            clines = canonical_body.splitlines()
+            blines = body.splitlines()
+            diffs = []
+            for i in range(max(len(clines), len(blines))):
+                c = clines[i] if i < len(clines) else '<EOF>'
+                b = blines[i] if i < len(blines) else '<EOF>'
+                if c != b:
+                    diffs.append(f"    L{i+1}: canonical={c!r} inline={b!r}")
+                    if len(diffs) >= 3:
+                        break
+            violations.append(
+                f"{path} body#{idx}: hash={body_hash} != canonical={canonical_hash}\n" +
+                '\n'.join(diffs)
+            )
 
-if fail:
-    for f in fail: print(f, file=sys.stderr)
+if violations:
+    print(f"[test_9] canonical hash: {canonical_hash}", file=sys.stderr)
+    print(f"[test_9] {len(violations)} drifted copy(ies) out of {total_bodies}:", file=sys.stderr)
+    for v in violations: print(v, file=sys.stderr)
     sys.exit(1)
+print(f"[test_9] all {total_bodies} inline copies byte-equal to canonical ({canonical_hash})")
 sys.exit(0)
 PYEOF
     local rc=$?
     if [ "$rc" = "0" ]; then
         _pass "$name"
     else
-        _fail "$name" "parity violations above"
+        _fail "$name" "byte-exact drift above"
     fi
 }
 

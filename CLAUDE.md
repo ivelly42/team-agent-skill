@@ -21,4 +21,4 @@
 ```
 
 ## Current Status
-[2026-04-20] Codex 7차 findings 2건 수정: (1) Test 8 command-level state machine 재작성 — `FOO=1 timeout 300 codex exec` · `env timeout` prefix 포함 모든 비-`_run_with_timeout` launcher 거부, (2) SKILL.md 4곳 + codex/gemini-verification.md 인라인 watchdog body를 canonical(refs/timeout-wrapper.sh)과 byte-parity 동기화 — `if not cmd` empty guard, `cmd not found` diagnostic, `124 if rc in (0, -SIGTERM)` 정규화 추가. Test 9 parity 추가. smoke 9/9 + schema 6/6 = 15 PASS. Codex 8차 검증 대기.
+[2026-04-20] Codex 8차 findings 2건 수정: (1) Test 8에 argv child check 추가 — `_run_with_timeout <secs> <grace> <child>`의 child가 codex/gemini가 아니면 violation. `_run_with_timeout 300 30 bash -lc 'codex exec ...'` 같은 nested shell wrapper 거부. strip_quoted_regions로 따옴표 내부 CLI substring false positive 제거. (2) Test 9를 canonical byte-exact 비교로 대체 — `refs/timeout-wrapper.sh` Python body를 source-of-truth로 삼아 SKILL.md 4 + cross/codex/gemini-verification.md 3 = 총 7곳 인라인과 SHA256 대조 (현재 hash `7c923c0bc49f`로 통일). cross-verification.md body의 부가 주석 제거로 canonical parity 완성. smoke 9/9 + schema 6/6 = 15 PASS. Codex 9차 대기.

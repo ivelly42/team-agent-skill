@@ -108,8 +108,6 @@ secs = int(sys.argv[1]); grace = int(sys.argv[2]); cmd = sys.argv[3:]
 if not cmd:
     print("[team-agent] _run_with_timeout: empty cmd", file=sys.stderr); sys.exit(2)
 try:
-    # stdin은 명시적으로 상속 — `codex exec -`, `gemini -p -`는 prompt를 fd 0으로 읽는다.
-    # start_new_session=True → 자체 프로세스 그룹 (하위 process 일괄 정리 가능).
     p = subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
 except FileNotFoundError as e:
     print(f"[team-agent] cmd not found: {e}", file=sys.stderr); sys.exit(127)
