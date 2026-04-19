@@ -330,3 +330,70 @@
 - 모니터링: 파이프라인 지연 알림, 데이터 신선도, 누적 지표
 - 저장 전략: 파티셔닝, 압축, 콜드/핫 스토리지 분리
 - 탐색 힌트: `*pipeline*`, `*stream*`, `*ingest*`, `*etl*`, `*queue*`, `*kafka*`, `*redis*` 파일. `grep -rn "subscribe\|publish\|consume\|produce\|stream\|pipeline\|queue\|kafka\|redis" --include="*.{py,ts,yaml}"` 실행
+
+## RAG 아키텍처
+
+- [ ] 문서 청킹 전략 — 고정 크기 vs 의미 단위, 오버랩, 청크 크기가 임베딩 모델 최대 토큰과 일치
+- [ ] 임베딩 모델 선택 근거 — 도메인 특화 vs 범용, 차원 수, 다국어 지원
+- [ ] 리트리버 방식 — dense only / sparse(BM25) / hybrid / re-ranking
+- [ ] top-k·threshold — 검색 결과 수와 유사도 컷오프가 품질 측정으로 튜닝됨
+- [ ] 컨텍스트 주입 — 원문 위치 표시, 인용 강제, 컨텍스트 길이 제한
+- [ ] 캐시 전략 — 질의/임베딩/응답 캐시, 무효화 조건
+- [ ] 할루시네이션 방어 — "컨텍스트에 없으면 모른다" 지시, 인용 누락 감지
+- [ ] 평가 메트릭 — retrieval recall/precision, answer faithfulness, 수동 샘플 검토
+- [ ] 인덱스 갱신 주기 — 실시간 vs 배치, 증분 업데이트 가능성
+
+**탐색 힌트**: `*retriev*`, `*embed*`, `*chunk*`, `prompt.*.yaml`, langchain/llamaindex import
+
+## 벡터DB
+
+- [ ] DB 선택 근거 — 규모·쿼리 특성·운영 비용 적합성
+- [ ] 인덱스 파라미터 — HNSW M/efConstruction, IVF nlist 등 튜닝 여부
+- [ ] 메타데이터 필터 — pre-filtering vs post-filtering 성능 영향
+- [ ] 업서트 패턴 — 전체 재인덱싱 vs 증분, 중복 방지 키
+- [ ] 파티셔닝 — 테넌트·시간·언어 분리
+- [ ] 백업·복구 — 인덱스 재구축 시간, 스냅샷 전략
+- [ ] 쿼리 성능 — p95/p99 레이턴시, N+1 embed 호출 감지
+- [ ] 비용 — 인덱스 메모리 사용, 쿼리당 비용
+
+**탐색 힌트**: `*vector*`, `*index*`, pinecone/weaviate/qdrant/chroma/pgvector import
+
+## 프롬프트 엔지니어링
+
+- [ ] 프롬프트 버전 관리 — 외부 파일 vs 인라인, 버전 태그, 롤백 가능성
+- [ ] 시스템·유저 프롬프트 분리 — 역할 혼입 여부
+- [ ] Few-shot 구성 — 예시 수·다양성·편향 검토
+- [ ] 체인 구조 — CoT/ToT 필요성, 단계별 실패 지점 격리
+- [ ] 토큰 예산 — 입력 최대치 검증, truncation 전략
+- [ ] 구조화 출력 — JSON schema/function calling 사용, 파싱 실패 폴백
+- [ ] 인젝션 방어 — 사용자 입력과 지시어 명확 구분, 구분자 전략
+- [ ] 프롬프트 캐싱 — Anthropic cache_control, OpenAI prompt cache 활용
+- [ ] 모델 독립성 — 특정 모델에 과적합된 프롬프트인지
+
+**탐색 힌트**: `prompts/`, `*.prompt.*`, `*.md` 내 SYSTEM/USER 블록, openai/anthropic sdk import
+
+## 모델 평가/eval
+
+- [ ] 평가 데이터셋 — 크기·다양성·실사용 분포 일치 여부
+- [ ] 메트릭 선택 — task별 적합성 (BLEU/ROUGE/F1/LLM-as-judge/human)
+- [ ] 베이스라인 — 이전 버전·경쟁 모델 비교 설정
+- [ ] 리그레션 감지 — CI에서 eval 실행, 임계값 alerting
+- [ ] LLM-as-judge 편향 — 판정자 모델과 평가 대상 같은 모델 사용 금지
+- [ ] 에지 케이스 커버리지 — 긴 입력, 다국어, 악의적 입력, 빈 입력
+- [ ] 재현성 — seed/temperature 고정, 실행 환경 명시
+- [ ] 비용 추적 — eval 실행 비용, 샘플링 전략
+
+**탐색 힌트**: `eval*/`, `benchmark*/`, `tests/**/llm*`, pytest에서 OpenAI/Anthropic 호출
+
+## 파인튜닝
+
+- [ ] 데이터 품질 — 정제·중복 제거·라벨 일관성
+- [ ] 데이터 분할 — train/val/test 오염 방지, 시간 기반 split
+- [ ] 하이퍼파라미터 — LR·배치·epoch 근거, warmup/decay
+- [ ] LoRA/QLoRA vs Full — 계산 비용 대비 효과
+- [ ] 오버피팅 모니터링 — val loss, 조기 종료
+- [ ] 배포 형태 — 어댑터 머지 여부, 양자화 전략
+- [ ] 안전성 재검증 — 기본 모델 대비 harmful 응답 증가 여부
+- [ ] 재학습 워크플로우 — 데이터 갱신 → 재학습 자동화
+
+**탐색 힌트**: `transformers/`, `peft`, `trainer.py`, `*finetune*`, `datasets/` with jsonl
