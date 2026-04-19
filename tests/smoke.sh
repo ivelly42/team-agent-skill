@@ -451,6 +451,11 @@ def validate_wrapped(cmd_text):
             return False, f"codex without 'exec' subcommand: {tokens[4] if len(tokens) >= 5 else '<none>'}"
         return True, None
     if child == 'gemini':
+        # Codex 22차 [high]: gemini wrapper contract는 `-p` stdin prompt consumer.
+        # `--version`, `list`, `login` 같은 비-`-p` 모드는 stdin을 소비하지 않으므로
+        # `_run_with_timeout`이 launch할 이유가 없음.
+        if '-p' not in tokens[4:]:
+            return False, f"gemini without -p (wrapper contract requires stdin prompt mode)"
         return True, None
     return False, f"child={child!r} (must be codex/gemini, not interpreter wrapper)"
 
@@ -712,6 +717,8 @@ def validate_wrapped(cmd_text):
             return False, f'codex without exec'
         return True, None
     if child == 'gemini':
+        if '-p' not in tokens[4:]:
+            return False, f'gemini without -p'
         return True, None
     return False, f'child={child!r}'
 
@@ -914,11 +921,12 @@ FIXTURES = [
     ('backtick dquote leak pipe',   '_run_with_timeout 300 30 codex exec --note `printf \'"\'` | tee out', True),
     ('semicolon chained codex',     '_run_with_timeout 300 30 codex exec - ; codex exec -',               True),
     ('and-and chained codex',       '_run_with_timeout 300 30 codex exec - && codex exec -',             True),
+    ('gemini wrapped without -p',   '_run_with_timeout 300 30 gemini --version',                          True),
 ]
 
 import hashlib
 
-EXPECTED_FIXTURE_COUNT = 38
+EXPECTED_FIXTURE_COUNT = 39
 if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(
         f"FATAL: FIXTURES count regression — expected {EXPECTED_FIXTURE_COUNT}, got {len(FIXTURES)}",
@@ -928,7 +936,7 @@ if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     sys.exit(1)
 
 # Codex 19차 추가: cmd-subst/backtick 내부 inert quoted literal 3개 OK fixture.
-EXPECTED_FIXTURE_SIGNATURE = "130802992ce6783aba25c0665198dea16462034adffeabfb4b27ceeadc7fa095"
+EXPECTED_FIXTURE_SIGNATURE = "9c66a515d12aed5a570afc7b83ecfd24d30740900a14f5c3f0bc75f6cb95d6fa"
 _sig_input = "\n".join(f"{d}|{c}|{e}" for d, c, e in FIXTURES)
 _actual_sig = hashlib.sha256(_sig_input.encode()).hexdigest()
 if _actual_sig != EXPECTED_FIXTURE_SIGNATURE:
@@ -953,6 +961,7 @@ REQUIRED_BYPASS_DESCS = {
     "dquoted $() pipe bypass", "dquoted $() bg bypass",
     "backtick dquote leak pipe",
     "semicolon chained codex", "and-and chained codex",
+    "gemini wrapped without -p",
 }
 REQUIRED_OK_DESCS = {
     "direct codex child", "direct gemini child",

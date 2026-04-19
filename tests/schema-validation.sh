@@ -294,6 +294,37 @@ try:
 except jsonschema.ValidationError:
     pass
 
+# Codex 22차: failure status인데 error 필드 누락 → 거부되어야 함 (conditional required)
+failure_no_error = {
+    "role": "x",
+    "status": "all_agents_failed",
+    "consensus_findings": [],
+    "consensus_ideas": [],
+    "contradictions": []
+}
+try:
+    jsonschema.validate(failure_no_error, schema)
+    print("failure status without error was accepted (conditional required broken)", file=sys.stderr)
+    sys.exit(4)
+except jsonschema.ValidationError:
+    pass
+
+# Codex 22차: consolidator_failed + error 빈 문자열 → 거부 (minLength: 1)
+failure_empty_error = {
+    "role": "x",
+    "status": "consolidator_failed",
+    "error": "",
+    "consensus_findings": [],
+    "consensus_ideas": [],
+    "contradictions": []
+}
+try:
+    jsonschema.validate(failure_empty_error, schema)
+    print("failure status with empty error was accepted (minLength broken)", file=sys.stderr)
+    sys.exit(5)
+except jsonschema.ValidationError:
+    pass
+
 sys.exit(0)
 PYEOF
     local rc=$?

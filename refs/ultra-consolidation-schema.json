@@ -5,6 +5,27 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["role", "consensus_findings", "consensus_ideas", "contradictions", "status"],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": ["all_agents_failed", "consolidator_failed", "downgraded"]
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "role": {
       "type": "string",
