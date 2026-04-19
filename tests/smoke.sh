@@ -244,57 +244,72 @@ def extract_bash_blocks(lines):
     return blocks
 
 def strip_quoted_regions(text):
-    """따옴표 안을 공백으로 치환하되, 활성 shell 코드(`$(...)`, backtick)는 보존.
-    Codex 13차 [high] 해결: `OUT="$(codex exec - ...)"` 같은 command substitution은
-    double-quote 안이어도 실제 실행되므로 prose 취급하면 안 된다.
-    backslash escape는 literal로 처리. single-quote 내부는 completely inert."""
+    """Codex 19차 [medium] 해결: `$(...)` 와 backtick body를 재귀적으로 quote-strip.
+    내부의 inert quoted literal(`printf "codex exec"`)도 blank 처리.
+    단 $() 내부에서 실제로 실행되는 command는 boundary outside라 operator 자체는
+    여전히 보인다. 여기 함수는 CLI_RE 검사용 unquoted view만 생성."""
     out = []
     j, n = 0, len(text)
     in_single = in_double = False
     while j < n:
         ch = text[j]
         if ch == '\\' and j + 1 < n:
-            out.append(' '); out.append(' ')
-            j += 2
-            continue
+            out.append(' '); out.append(' '); j += 2; continue
         if ch == "'" and not in_double:
-            in_single = not in_single
-            out.append(' '); j += 1; continue
+            in_single = not in_single; out.append(' '); j += 1; continue
         if ch == '"' and not in_single:
-            in_double = not in_double
-            out.append(' '); j += 1; continue
-        # double-quote 안의 `$(...)` 는 executable — 내용 보존
-        if in_double and ch == '$' and j + 1 < n and text[j+1] == '(':
-            out.append(' '); out.append(' ')  # `$(` 자체는 blank (길이 유지)
-            depth = 1
-            k = j + 2
+            in_double = not in_double; out.append(' '); j += 1; continue
+        # `$(...)` — body 추출 후 재귀 quote-strip.
+        if ch == '$' and j + 1 < n and text[j+1] == '(' and not in_single:
+            out.append(' '); out.append(' ')  # `$(` blank
+            depth = 1; k = j + 2; body_start = k
             while k < n and depth > 0:
                 c2 = text[k]
+                if c2 == '\\' and k + 1 < n:
+                    k += 2; continue
+                if c2 == "'" and not in_double:
+                    # single-quote inside $(): find matching close
+                    k += 1
+                    while k < n and text[k] != "'":
+                        if text[k] == '\\' and k + 1 < n: k += 2
+                        else: k += 1
+                    if k < n: k += 1
+                    continue
+                if c2 == '"':
+                    k += 1
+                    while k < n and text[k] != '"':
+                        if text[k] == '\\' and k + 1 < n: k += 2
+                        else: k += 1
+                    if k < n: k += 1
+                    continue
                 if c2 == '(':
-                    depth += 1; out.append('('); k += 1; continue
-                if c2 == ')':
+                    depth += 1
+                elif c2 == ')':
                     depth -= 1
                     if depth == 0:
-                        out.append(' '); k += 1; break
-                    out.append(')'); k += 1; continue
-                out.append(c2); k += 1
+                        break
+                k += 1
+            body = text[body_start:k]
+            # 재귀 quote-strip: 내부 quoted literal도 blank됨.
+            stripped = strip_quoted_regions(body)
+            out.extend(stripped)
+            if k < n:
+                out.append(' '); k += 1  # `)` blank
             j = k
             continue
-        # backtick command substitution (quote 밖 또는 double 안 모두 활성)
+        # backtick command substitution — 내부 재귀 quote-strip.
         if ch == '`' and not in_single:
-            # `...` 내용은 보존, 양끝 backtick만 blank
             out.append(' ')
-            k = j + 1
+            k = j + 1; body_start = k
             while k < n and text[k] != '`':
                 if text[k] == '\\' and k + 1 < n:
-                    out.append(' '); out.append(' ')
-                    k += 2
-                    continue
-                out.append(text[k])
+                    k += 2; continue
                 k += 1
+            body = text[body_start:k]
+            stripped = strip_quoted_regions(body)
+            out.extend(stripped)
             if k < n:
-                out.append(' ')  # closing backtick
-                k += 1
+                out.append(' '); k += 1
             j = k
             continue
         if in_single or in_double:
@@ -493,7 +508,7 @@ PYEOF
 # ───────────────────────────────────────────────────────────
 # 현재 canonical full-block SHA256. 값이 바뀌면 의도된 wrapper 변경이므로 반드시
 # 테스트에서 업데이트. 바꾸는 커밋은 의도적 canonical 리팩터여야 한다.
-EXPECTED_CANONICAL_SHA256="8c217c34c677edef9ea43cefcf89cb926cbc4afff39e0e3c20a8beebd89eaffb"
+EXPECTED_CANONICAL_SHA256="5c0c6d2c9e8449f5249bd01cc9a48582412c2465519f1c292913a8873a6cc930"
 test_timeout_wrapper_parity() {
     local name="canonical ↔ 인라인 wrapper full-block byte-exact parity"
     local canonical="$SKILL_DIR/refs/timeout-wrapper.sh"
@@ -686,7 +701,7 @@ def validate_wrapped(cmd_text):
     return False, f'child={child!r}'
 
 def strip_quoted_regions(text):
-    """Codex 13차 [high]: `$(...)` 과 backtick 은 double-quote 안이어도 활성 code."""
+    """Codex 19차 [medium]: `$(...)` 와 backtick body를 재귀적으로 quote-strip."""
     out = []
     j, n = 0, len(text)
     in_single = in_double = False
@@ -698,27 +713,48 @@ def strip_quoted_regions(text):
             in_single = not in_single; out.append(' '); j += 1; continue
         if ch == '"' and not in_single:
             in_double = not in_double; out.append(' '); j += 1; continue
-        if in_double and ch == '$' and j + 1 < n and text[j+1] == '(':
+        if ch == '$' and j + 1 < n and text[j+1] == '(' and not in_single:
             out.append(' '); out.append(' ')
-            depth = 1; k = j + 2
+            depth = 1; k = j + 2; body_start = k
             while k < n and depth > 0:
                 c2 = text[k]
+                if c2 == '\\' and k + 1 < n:
+                    k += 2; continue
+                if c2 == "'" and not in_double:
+                    k += 1
+                    while k < n and text[k] != "'":
+                        if text[k] == '\\' and k + 1 < n: k += 2
+                        else: k += 1
+                    if k < n: k += 1
+                    continue
+                if c2 == '"':
+                    k += 1
+                    while k < n and text[k] != '"':
+                        if text[k] == '\\' and k + 1 < n: k += 2
+                        else: k += 1
+                    if k < n: k += 1
+                    continue
                 if c2 == '(':
-                    depth += 1; out.append('('); k += 1; continue
-                if c2 == ')':
+                    depth += 1
+                elif c2 == ')':
                     depth -= 1
-                    if depth == 0:
-                        out.append(' '); k += 1; break
-                    out.append(')'); k += 1; continue
-                out.append(c2); k += 1
+                    if depth == 0: break
+                k += 1
+            body = text[body_start:k]
+            body = _unescape_shell_meta_10(body)
+            out.extend(strip_quoted_regions(body))
+            if k < n:
+                out.append(' '); k += 1
             j = k; continue
         if ch == '`' and not in_single:
             out.append(' ')
-            k = j + 1
+            k = j + 1; body_start = k
             while k < n and text[k] != '`':
-                if text[k] == '\\' and k + 1 < n:
-                    out.append(' '); out.append(' '); k += 2; continue
-                out.append(text[k]); k += 1
+                if text[k] == '\\' and k + 1 < n: k += 2; continue
+                k += 1
+            body = text[body_start:k]
+            body = _unescape_shell_meta_10(body)
+            out.extend(strip_quoted_regions(body))
             if k < n:
                 out.append(' '); k += 1
             j = k; continue
@@ -727,6 +763,15 @@ def strip_quoted_regions(text):
         else:
             out.append(ch)
         j += 1
+    return ''.join(out)
+
+def _unescape_shell_meta_10(s):
+    out = []; i = 0; n = len(s)
+    while i < n:
+        if s[i] == '\\' and i + 1 < n and s[i+1] in ('"', "'", '\\', '`', '$'):
+            out.append(s[i+1]); i += 2
+        else:
+            out.append(s[i]); i += 1
     return ''.join(out)
 
 def split_single_cmd(text):
@@ -826,6 +871,9 @@ FIXTURES = [
     ("attached paren subshell bg",  "(_run_with_timeout 300 30 codex exec -) &",           False),
     ("cmd-subst quoted paren",      '_run_with_timeout 300 30 codex exec --note $(printf ")" | wc -c)', False),
     ("subst with backtick paren",   "_run_with_timeout 300 30 codex exec --note $(printf `echo )` | wc -l)", False),
+    ("cmd-subst inert printf",      'echo "$(printf \\"codex exec -\\")"',                 False),
+    ("backtick inert printf",       'echo `printf "codex exec -"`',                        False),
+    ("backtick inside dquote inert", 'echo "`printf \\"codex exec -\\"`"',                 False),
     # === FAIL (violation 이어야 함) ===
     ("codex login (wrapped, CLI 없음)", "_run_with_timeout 300 30 codex login",            True),
     ("bash -lc wrapper",            "_run_with_timeout 300 30 bash -lc 'codex exec -'",   True),
@@ -855,7 +903,7 @@ FIXTURES = [
 
 import hashlib
 
-EXPECTED_FIXTURE_COUNT = 35
+EXPECTED_FIXTURE_COUNT = 38
 if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(
         f"FATAL: FIXTURES count regression — expected {EXPECTED_FIXTURE_COUNT}, got {len(FIXTURES)}",
@@ -864,8 +912,8 @@ if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(f"  If intentional expansion/pruning, update EXPECTED_FIXTURE_COUNT + signature + required sets.", file=sys.stderr)
     sys.exit(1)
 
-# Codex 18차 추가: $() 안 backtick 안의 `)` 오탐 regression (subst with backtick paren).
-EXPECTED_FIXTURE_SIGNATURE = "7cd9088a4b5e8196d2633377c97cb77f188fd69cc712128a4d062f5958998291"
+# Codex 19차 추가: cmd-subst/backtick 내부 inert quoted literal 3개 OK fixture.
+EXPECTED_FIXTURE_SIGNATURE = "130802992ce6783aba25c0665198dea16462034adffeabfb4b27ceeadc7fa095"
 _sig_input = "\n".join(f"{d}|{c}|{e}" for d, c, e in FIXTURES)
 _actual_sig = hashlib.sha256(_sig_input.encode()).hexdigest()
 if _actual_sig != EXPECTED_FIXTURE_SIGNATURE:
@@ -898,6 +946,8 @@ REQUIRED_OK_DESCS = {
     "redirect (not pipeline)",
     "cmd-subst pipeline inside", "attached paren subshell bg",
     "cmd-subst quoted paren", "subst with backtick paren",
+    "cmd-subst inert printf", "backtick inert printf",
+    "backtick inside dquote inert",
 }
 _fixture_map = {d: (c, e) for d, c, e in FIXTURES}
 _identity_errors = []

@@ -21,4 +21,4 @@
 ```
 
 ## Current Status
-[2026-04-20] Codex 18차 findings 1건 수정: `$()` 안 backtick 안의 `)` 가 잘못 subst_depth를 pop 시켜 false positive 발생. 해결: `)` pop 조건에 `not btick` 추가 + `$(` push 조건에도 `not btick` 추가 — backtick 내부의 `)` 는 subst frame을 건드리지 않음 (delimiter-typed stack semantics). Test 10 fixture 34→35 (`subst with backtick paren` OK — `$(printf \`echo )\` | wc -l)`), signature `7cd9088a4b5e...`. REQUIRED_OK 11. smoke 10/10 + schema 6/6 = 16 PASS. Codex 19차 대기.
+[2026-04-20] Codex 19차 findings 2건 수정: (1) Python watchdog이 SIGTERM 이후 child의 arbitrary rc를 그대로 반환하는 문제 — child가 SIGTERM 잡고 `exit(1)` 하면 timeout이 `1`로 보임. 해결: SIGTERM path로 들어왔으면 child rc 무시, 항상 `124` 반환. canonical + 7 inline copies 모두 동기화, new pinned hash `5c0c6d2c9e84...`. (2) `strip_quoted_regions`가 `$()` / backtick body 재귀 처리 + `\"`, `\'`, `\`` outer escape unescape — `echo "$(printf \"codex exec -\")"` 같은 inert printf 인자는 이제 false positive 아님. Test 10 fixture 35→38 (cmd-subst/backtick inert printf 3건 OK), signature `130802992ce6...`. REQUIRED_OK 14. smoke 10/10 + schema 6/6 = 16 PASS. Codex 20차 대기.

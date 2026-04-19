@@ -1248,19 +1248,18 @@ try:
 except FileNotFoundError as e:
     print(f"[team-agent] cmd not found: {e}", file=sys.stderr); sys.exit(127)
 try:
-    rc = p.wait(timeout=secs)
-    sys.exit(rc)
+    sys.exit(p.wait(timeout=secs))
 except subprocess.TimeoutExpired:
     try: os.killpg(p.pid, signal.SIGTERM)
     except ProcessLookupError: pass
     try:
-        rc = p.wait(timeout=grace)
-        sys.exit(124 if rc in (0, -signal.SIGTERM) else rc)
+        p.wait(timeout=grace)
     except subprocess.TimeoutExpired:
         try: os.killpg(p.pid, signal.SIGKILL)
         except ProcessLookupError: pass
         p.wait()
         sys.exit(137)
+    sys.exit(124)
 ' "$_secs" "$_grace" "$@"
     return $?
 }
@@ -1307,19 +1306,18 @@ try:
 except FileNotFoundError as e:
     print(f"[team-agent] cmd not found: {e}", file=sys.stderr); sys.exit(127)
 try:
-    rc = p.wait(timeout=secs)
-    sys.exit(rc)
+    sys.exit(p.wait(timeout=secs))
 except subprocess.TimeoutExpired:
     try: os.killpg(p.pid, signal.SIGTERM)
     except ProcessLookupError: pass
     try:
-        rc = p.wait(timeout=grace)
-        sys.exit(124 if rc in (0, -signal.SIGTERM) else rc)
+        p.wait(timeout=grace)
     except subprocess.TimeoutExpired:
         try: os.killpg(p.pid, signal.SIGKILL)
         except ProcessLookupError: pass
         p.wait()
         sys.exit(137)
+    sys.exit(124)
 ' "$_secs" "$_grace" "$@"
     return $?
 }
@@ -1517,19 +1515,18 @@ try:
 except FileNotFoundError as e:
     print(f"[team-agent] cmd not found: {e}", file=sys.stderr); sys.exit(127)
 try:
-    rc = p.wait(timeout=secs)
-    sys.exit(rc)
+    sys.exit(p.wait(timeout=secs))
 except subprocess.TimeoutExpired:
     try: os.killpg(p.pid, signal.SIGTERM)
     except ProcessLookupError: pass
     try:
-        rc = p.wait(timeout=grace)
-        sys.exit(124 if rc in (0, -signal.SIGTERM) else rc)
+        p.wait(timeout=grace)
     except subprocess.TimeoutExpired:
         try: os.killpg(p.pid, signal.SIGKILL)
         except ProcessLookupError: pass
         p.wait()
         sys.exit(137)
+    sys.exit(124)
 ' "$_secs" "$_grace" "$@"
     return $?
 }
@@ -1603,19 +1600,18 @@ try:
 except FileNotFoundError as e:
     print(f"[team-agent] cmd not found: {e}", file=sys.stderr); sys.exit(127)
 try:
-    rc = p.wait(timeout=secs)
-    sys.exit(rc)
+    sys.exit(p.wait(timeout=secs))
 except subprocess.TimeoutExpired:
     try: os.killpg(p.pid, signal.SIGTERM)
     except ProcessLookupError: pass
     try:
-        rc = p.wait(timeout=grace)
-        sys.exit(124 if rc in (0, -signal.SIGTERM) else rc)
+        p.wait(timeout=grace)
     except subprocess.TimeoutExpired:
         try: os.killpg(p.pid, signal.SIGKILL)
         except ProcessLookupError: pass
         p.wait()
         sys.exit(137)
+    sys.exit(124)
 ' "$_secs" "$_grace" "$@"
     return $?
 }
