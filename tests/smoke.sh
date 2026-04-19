@@ -361,13 +361,29 @@ for path in files:
 
     for block_start, block_lines in extract_bash_blocks(lines):
         for cmd_lineno, cmd in split_commands(block_lines):
-            # 따옴표 밖에만 CLI가 있는지 확인
-            cmd_unquoted = strip_quoted_regions(cmd)
-            if not CLI_RE.search(cmd_unquoted):
+            # Pre-check: CLI substring이 원본(quoted 포함)에 없으면 감사 대상 아님.
+            # `codex login`, `gemini config` 등 backend agent 호출 아닌 subcommand 제외.
+            if not CLI_RE.search(cmd):
                 continue
-            ok, reason = validate_wrapped(cmd)
-            if not ok:
-                violations.append(f"{path}:{cmd_lineno} {reason} :: {cmd[:140]}")
+            # 두 경로 검사 (9차 [high] 해결):
+            # Pass A: command가 _run_with_timeout으로 시작하면 argv child 검증.
+            #         CLI가 quoted payload 안에만 있어도 `bash -lc 'codex exec'` 형태를 잡는다.
+            # Pass B: _run_with_timeout이 아닌데 unquoted에도 CLI가 등장하면 unwrapped 호출 위반.
+            leading = strip_leading_modifiers(cmd.split())
+            starts_with_wrapper = bool(leading) and leading[0] == ALLOWED_LAUNCHER
+            if starts_with_wrapper:
+                ok, reason = validate_wrapped(cmd)
+                if not ok:
+                    violations.append(f"{path}:{cmd_lineno} {reason} :: {cmd[:140]}")
+                continue
+            # wrapper로 시작 안 함 + CLI 언급 있음 → unquoted에서도 매치되면 실제 exec,
+            # quoted 안에만 있으면 prose/doc string 으로 OK.
+            cmd_unquoted = strip_quoted_regions(cmd)
+            if CLI_RE.search(cmd_unquoted):
+                first = leading[0] if leading else '<none>'
+                violations.append(
+                    f"{path}:{cmd_lineno} unwrapped-launch first_exec={first!r} :: {cmd[:140]}"
+                )
 
 if violations:
     print(f"[test_8] {len(violations)} improperly-launched backend invocation(s):", file=sys.stderr)
@@ -384,22 +400,36 @@ PYEOF
 }
 
 # ───────────────────────────────────────────────────────────
-# Test 9: canonical byte-exact parity — refs/timeout-wrapper.sh의 Python watchdog
-# body와 모든 인라인 복사본을 byte-exact 비교. Codex 8차 [medium] 해결:
-# regex fragment 체크가 아니라 canonical function text를 source-of-truth로 사용.
+# Test 9: canonical byte-exact parity + pinned hash + exact copy counts
+# Codex 9차 [medium] 해결: relative equality만 체크하던 것을
+#   (1) canonical SHA256 pin
+#   (2) per-file 정확한 body count (SKILL.md=4, verification 3종=각1, total=7)
+# 로 강화. 협조적 drift (canonical + 복사본 동시 수정) 와 missing-copy 도 잡힌다.
 # ───────────────────────────────────────────────────────────
+# 현재 canonical hash — 이 값이 바뀌면 의도된 wrapper 변경이므로 반드시 테스트에서
+# 업데이트. 값을 바꾸는 커밋은 의도적 canonical 리팩터여야 한다.
+EXPECTED_CANONICAL_SHA256="7c923c0bc49f95deaee8d51931905dac8bc095cba5aad7ffbecf7bf45f9b80a1"
 test_timeout_wrapper_parity() {
-    local name="canonical ↔ 인라인 wrapper byte-exact parity"
+    local name="canonical ↔ 인라인 wrapper byte-exact parity (pinned hash + counts)"
     local canonical="$SKILL_DIR/refs/timeout-wrapper.sh"
     local inlines=("$SKILL_DIR/SKILL.md" "$SKILL_DIR/refs/codex-verification.md" \
                    "$SKILL_DIR/refs/cross-verification.md" "$SKILL_DIR/refs/gemini-verification.md")
 
-    python3 - "$canonical" "${inlines[@]}" <<'PYEOF'
-import hashlib, re, sys
-canonical_path = sys.argv[1]
-inline_paths = sys.argv[2:]
+    python3 - "$EXPECTED_CANONICAL_SHA256" "$canonical" "${inlines[@]}" <<'PYEOF'
+import hashlib, os, re, sys
+expected_hash = sys.argv[1]
+canonical_path = sys.argv[2]
+inline_paths = sys.argv[3:]
 
-# `python3 -c '\n...\n' "$_secs" "$_grace" "$@"` 형태의 body 추출
+# 각 파일별 반드시 존재해야 할 body 개수. 누락 = violation.
+EXPECTED_COUNTS = {
+    'SKILL.md': 4,
+    'refs/codex-verification.md': 1,
+    'refs/cross-verification.md': 1,
+    'refs/gemini-verification.md': 1,
+}
+EXPECTED_TOTAL = sum(EXPECTED_COUNTS.values())  # 7
+
 PY_BODY_RE = re.compile(r"python3\s+-c\s+'\n(.*?)\n'\s*\"\$_secs\"", re.DOTALL)
 
 try:
@@ -412,24 +442,41 @@ canonical_bodies = PY_BODY_RE.findall(canonical_text)
 if not canonical_bodies:
     print(f"FATAL: canonical has no python3 -c body: {canonical_path}", file=sys.stderr); sys.exit(2)
 canonical_body = canonical_bodies[0]
-canonical_hash = hashlib.sha256(canonical_body.encode()).hexdigest()[:12]
+canonical_hash = hashlib.sha256(canonical_body.encode()).hexdigest()
+
+# (1) canonical hash가 pinned 값과 일치해야 함 (coordinated drift 방지)
+if canonical_hash != expected_hash:
+    print(f"FATAL: canonical hash drift", file=sys.stderr)
+    print(f"  expected: {expected_hash}", file=sys.stderr)
+    print(f"  actual:   {canonical_hash}", file=sys.stderr)
+    print(f"  canonical file: {canonical_path}", file=sys.stderr)
+    print(f"  → 의도적 wrapper 변경이면 EXPECTED_CANONICAL_SHA256를 새 값으로 업데이트", file=sys.stderr)
+    sys.exit(1)
+
+# inline 파일별 body 집계
+def rel_key(path):
+    # SKILL_DIR 하위 상대경로 추출 (tests 디렉토리 기준 상위)
+    # 단순히 basename 또는 refs/basename
+    parts = path.split('/')
+    if 'refs' in parts:
+        idx = parts.index('refs')
+        return '/'.join(parts[idx:])
+    return parts[-1]
 
 violations = []
-total_bodies = 0
+actual_counts = {}
 for path in inline_paths:
+    rel = rel_key(path)
     try:
         with open(path, encoding='utf-8') as f:
             text = f.read()
     except FileNotFoundError:
-        violations.append(f"{path}: file missing"); continue
+        violations.append(f"{rel}: file missing"); actual_counts[rel] = 0; continue
     bodies = PY_BODY_RE.findall(text)
-    if not bodies:
-        violations.append(f"{path}: no inline python3 -c body found"); continue
+    actual_counts[rel] = len(bodies)
     for idx, body in enumerate(bodies, 1):
-        total_bodies += 1
         if body != canonical_body:
             body_hash = hashlib.sha256(body.encode()).hexdigest()[:12]
-            # 처음 달라지는 라인 3개만 간단히 표시
             clines = canonical_body.splitlines()
             blines = body.splitlines()
             diffs = []
@@ -441,23 +488,36 @@ for path in inline_paths:
                     if len(diffs) >= 3:
                         break
             violations.append(
-                f"{path} body#{idx}: hash={body_hash} != canonical={canonical_hash}\n" +
-                '\n'.join(diffs)
+                f"{rel} body#{idx}: hash={body_hash} drift vs canonical\n" + '\n'.join(diffs)
             )
 
+# (2) per-file count 검증
+for expected_rel, expected_n in EXPECTED_COUNTS.items():
+    got = actual_counts.get(expected_rel, 0)
+    if got != expected_n:
+        violations.append(
+            f"{expected_rel}: expected exactly {expected_n} inline body(ies), got {got}"
+        )
+
+# (3) total count 검증
+total = sum(actual_counts.values())
+if total != EXPECTED_TOTAL:
+    violations.append(f"total: expected {EXPECTED_TOTAL} inline copies, got {total}")
+
 if violations:
-    print(f"[test_9] canonical hash: {canonical_hash}", file=sys.stderr)
-    print(f"[test_9] {len(violations)} drifted copy(ies) out of {total_bodies}:", file=sys.stderr)
+    print(f"[test_9] canonical pinned hash: {expected_hash[:12]}... OK", file=sys.stderr)
+    print(f"[test_9] {len(violations)} violation(s):", file=sys.stderr)
     for v in violations: print(v, file=sys.stderr)
     sys.exit(1)
-print(f"[test_9] all {total_bodies} inline copies byte-equal to canonical ({canonical_hash})")
+print(f"[test_9] canonical hash pinned at {expected_hash[:12]}...")
+print(f"[test_9] all {total} inline copies byte-equal across {len(EXPECTED_COUNTS)} files")
 sys.exit(0)
 PYEOF
     local rc=$?
     if [ "$rc" = "0" ]; then
         _pass "$name"
     else
-        _fail "$name" "byte-exact drift above"
+        _fail "$name" "pinned-parity violations above"
     fi
 }
 
@@ -474,9 +534,118 @@ test_nfkd_hyphen_normalize
 test_symlink_guard
 test_schema_structure
 test_meta_mode_env_override
+# ───────────────────────────────────────────────────────────
+# Test 10 (meta): Test 8이 알려진 bypass 패턴을 실제로 잡는지 adversarial fixture로 검증.
+# Codex 9차 "next steps"의 명시적 요구: bash -lc / sh -c / missing-copy 시나리오 fixture.
+# ───────────────────────────────────────────────────────────
+test_lint_adversarial_fixtures() {
+    local name="meta: Test 8 lint이 알려진 bypass fixture를 거부하는지"
+    python3 - <<'PYEOF'
+import re, sys
+
+CLI_RE = re.compile(r'\b(codex\s+exec|gemini\s+(?:-m\s+\S+\s+)?(?:--json-schema\s+\S+\s+)?-p)\b')
+ALLOWED_LAUNCHER = '_run_with_timeout'
+
+def strip_leading_modifiers(tokens):
+    while tokens and tokens[0] in ('!', 'time', '(', '((', '{', 'exec', 'eval'):
+        tokens = tokens[1:]
+    while tokens and re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', tokens[0]):
+        tokens = tokens[1:]
+    return tokens
+
+def validate_wrapped(cmd_text):
+    tokens = strip_leading_modifiers(cmd_text.split())
+    if not tokens: return False, 'empty'
+    if tokens[0] != ALLOWED_LAUNCHER: return False, f'launcher={tokens[0]!r}'
+    if len(tokens) < 4: return False, 'argv short'
+    child = tokens[3]
+    if re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', child):
+        return False, f'child assignment: {child!r}'
+    if child == 'codex':
+        if len(tokens) < 5 or tokens[4] != 'exec':
+            return False, f'codex without exec'
+        return True, None
+    if child == 'gemini':
+        return True, None
+    return False, f'child={child!r}'
+
+def strip_quoted_regions(text):
+    out = []
+    j, n = 0, len(text)
+    in_single = in_double = False
+    while j < n:
+        ch = text[j]
+        if ch == '\\' and j + 1 < n:
+            out.append(' '); out.append(' '); j += 2; continue
+        if ch == "'" and not in_double:
+            in_single = not in_single; out.append(' '); j += 1; continue
+        if ch == '"' and not in_single:
+            in_double = not in_double; out.append(' '); j += 1; continue
+        if in_single or in_double:
+            out.append(' ')
+        else:
+            out.append(ch)
+        j += 1
+    return ''.join(out)
+
+def check_violation(cmd):
+    """Test 8의 pre-check + 2-pass 로직과 동일. True = violation."""
+    if not CLI_RE.search(cmd):
+        return False  # 감사 대상 아님
+    leading = strip_leading_modifiers(cmd.split())
+    starts_with_wrapper = bool(leading) and leading[0] == ALLOWED_LAUNCHER
+    if starts_with_wrapper:
+        ok, _ = validate_wrapped(cmd)
+        return not ok
+    cmd_unquoted = strip_quoted_regions(cmd)
+    return bool(CLI_RE.search(cmd_unquoted))
+
+# (설명, 명령, expect_violation)
+FIXTURES = [
+    # === OK (violation 아님) ===
+    ("direct codex child",         "_run_with_timeout 600 30 codex exec - -s read-only", False),
+    ("direct gemini child",        "_run_with_timeout 600 30 gemini -m foo -p -",        False),
+    ("quoted CLI in echo",         'echo "codex exec prose example"',                    False),
+    ("quoted gemini in echo",      "echo 'gemini -p documentation'",                     False),
+    ("codex login (감사 대상 아님)", "_run_with_timeout 300 30 codex login",               False),
+    ("gemini version (감사 대상 아님)", "gemini --version",                                False),
+    # === FAIL (violation 이어야 함) ===
+    ("bash -lc wrapper",           "_run_with_timeout 300 30 bash -lc 'codex exec -'",   True),
+    ("sh -c wrapper",              '_run_with_timeout 300 30 sh -c "gemini -p -"',       True),
+    ("zsh -c wrapper",             '_run_with_timeout 300 30 zsh -c "codex exec -"',     True),
+    ("env prefix wrapper",         "_run_with_timeout 300 30 env codex exec -",          True),
+    ("nohup wrapper",              "_run_with_timeout 300 30 nohup codex exec -",        True),
+    ("bare codex call",            "codex exec - -s read-only",                          True),
+    ("bare gemini call",           "gemini -p -",                                        True),
+    ("FOO=1 timeout bypass",       "FOO=1 timeout 300 codex exec -",                     True),
+    ("gtimeout prefix",            "gtimeout 300 codex exec -",                          True),
+]
+
+failures = []
+for desc, cmd, expect in FIXTURES:
+    got = check_violation(cmd)
+    if got != expect:
+        failures.append(f"  {desc}: expected violation={expect}, got={got}\n    cmd: {cmd!r}")
+
+if failures:
+    print(f"[test_10] {len(failures)} fixture(s) behaved unexpectedly:", file=sys.stderr)
+    for f in failures: print(f, file=sys.stderr)
+    sys.exit(1)
+print(f"[test_10] all {len(FIXTURES)} adversarial fixtures behaved as expected")
+sys.exit(0)
+PYEOF
+    local rc=$?
+    if [ "$rc" = "0" ]; then
+        _pass "$name"
+    else
+        _fail "$name" "fixture mismatches above"
+    fi
+}
+
 test_grep_batch_args
 test_backend_calls_timeout_guarded
 test_timeout_wrapper_parity
+test_lint_adversarial_fixtures
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 total=$((PASS+FAIL))
