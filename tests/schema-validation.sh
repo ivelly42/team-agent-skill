@@ -162,7 +162,9 @@ test_ultra_failure_shapes() {
     local schema="$SKILL_DIR/refs/ultra-consolidation-schema.json"
 
     if [ "$USE_JSONSCHEMA" != "1" ]; then
-        _pass "Ultra failure shape schema-valid (degraded: skipped — requires jsonschema)"
+        # degraded mode에서 PASS로 올리면 "false green light" — Codex adversarial verification
+        # 재발견(#3 regression). _skip으로 전환해 summary·exit semantics 일관성 유지.
+        _skip "Ultra failure shape schema-valid"
         return
     fi
 

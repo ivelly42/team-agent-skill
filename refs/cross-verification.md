@@ -77,27 +77,57 @@ suggested_severity: "Critical" | "High" | "Medium" | "Low" | "Info"
 
 ```bash
 # ───────────────────────────────────────────────────────────
-# 1. 포터블 timeout 래퍼 탐지 (macOS 호환)
+# 1. 포터블 timeout 래퍼 (3단 fallback — 무한 대기 절대 금지)
 # ───────────────────────────────────────────────────────────
+# 우선순위: GNU timeout > gtimeout(Homebrew coreutils) > Python watchdog
+# Python 3가 없는 환경은 가정하지 않는다 (skill 자체가 python3 의존).
 _TIMEOUT_BIN=""
 if command -v timeout >/dev/null 2>&1; then
   _TIMEOUT_BIN="timeout"
 elif command -v gtimeout >/dev/null 2>&1; then
   _TIMEOUT_BIN="gtimeout"
-else
-  echo "[team-agent WARN] timeout/gtimeout 미발견 — 무한 대기 위험. brew install coreutils 권장." >&2
 fi
 
-# SIGTERM → 30초 grace → SIGKILL. 래퍼 없으면 직접 실행.
+# SIGTERM → grace → SIGKILL. 3단 fallback: 어떤 환경에서도 hang 없음 (fail-closed).
 _run_with_timeout() {
   # $1=secs, $2=grace_secs, $@=cmd...
   local _secs="$1"; shift
   local _grace="$1"; shift
   if [ -n "$_TIMEOUT_BIN" ]; then
     "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"
-  else
-    "$@"
+    return $?
   fi
+
+  # Python watchdog fallback — hang 방지 필수. GNU coreutils 없는 bare macOS에서도 작동.
+  # 자식 프로세스 그룹을 생성해 하위 프로세스까지 SIGTERM/SIGKILL 정리.
+  python3 - "$_secs" "$_grace" "$@" <<'PYEOF'
+import os, signal, subprocess, sys, time
+secs = int(sys.argv[1]); grace = int(sys.argv[2]); cmd = sys.argv[3:]
+if not cmd:
+    print("[team-agent] _run_with_timeout: empty cmd", file=sys.stderr); sys.exit(2)
+try:
+    # start_new_session=True → 자체 프로세스 그룹 (하위 process group 일괄 정리 가능)
+    p = subprocess.Popen(cmd, start_new_session=True)
+except FileNotFoundError as e:
+    print(f"[team-agent] cmd not found: {e}", file=sys.stderr); sys.exit(127)
+try:
+    rc = p.wait(timeout=secs)
+    sys.exit(rc)
+except subprocess.TimeoutExpired:
+    # SIGTERM to whole process group
+    try: os.killpg(p.pid, signal.SIGTERM)
+    except ProcessLookupError: pass
+    try:
+        rc = p.wait(timeout=grace)
+        sys.exit(124 if rc in (0, -signal.SIGTERM) else rc)
+    except subprocess.TimeoutExpired:
+        # Grace expired → SIGKILL group
+        try: os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError: pass
+        p.wait()
+        sys.exit(137)  # GNU convention for SIGKILL
+PYEOF
+  return $?
 }
 
 # ───────────────────────────────────────────────────────────

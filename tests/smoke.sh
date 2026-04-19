@@ -168,13 +168,18 @@ test_meta_mode_env_override() {
 test_grep_batch_args() {
     local name="C6 배치 — 변경 파일 stem 배열 → 단일 grep 호출"
     local tmp; tmp=$(mktemp -d)
+    # git identity를 로컬 repo에만 설정 — 전역 user.name/email 없는 clean CI·fresh box에서도
+    # spurious failure 방지 (Codex adversarial 재발견 #3).
     (cd "$tmp" && git init -q && \
+        git config user.email "test@team-agent.local" && \
+        git config user.name "team-agent-test" && \
+        git config commit.gpgsign false && \
         mkdir -p pkg app && \
         echo "export default 1" > pkg/foo.ts && \
         echo "export default 2" > pkg/bar.ts && \
         echo "import './pkg/foo'" > app/uses-foo.ts && \
         echo "import './pkg/bar'" > app/uses-bar.ts && \
-        git add -A && git commit -q -m init 2>/dev/null) || { rm -rf "$tmp"; _fail "$name" "git init 실패"; return; }
+        git add -A && git commit -q -m init) || { rm -rf "$tmp"; _fail "$name" "git init 실패"; return; }
 
     local _GREP_ARGS=()
     local stems=(pkg/foo pkg/bar)
