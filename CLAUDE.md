@@ -21,4 +21,4 @@
 ```
 
 ## Current Status
-[2026-04-20] Codex adversarial finding #1 수정: `refs/cross-verification.md` 실행 블록에 포터블 timeout 래퍼 + per-process rc 캡처 + 3단계 검증(rc/empty/json) + 4-way fallback 매트릭스(full_3way/codex_only/gemini_only/skipped) 구현. `manifest.verification`에 mode·rc·failed_reason·duration_sec 필드 추가. 스키마에 verification_mode enum 추가, SKILL.md Phase 4-A-2 폴백 서술 동기화.
+[2026-04-20] Codex adversarial 3 findings 전부 수정 (commit d6c26b5): #1 --cross timeout/fallback 매트릭스 구현, #2 Ultra 실패 shape-stable contract + schema 업데이트, #3 schema-validation.sh 하드게이트(TEAM_AGENT_SCHEMA_STRICT=0 opt-in SKIP). smoke 7/7 + schema 6/6. 3 Codex 경로 모두 silent failure 제거. 잔여 아키텍처 항목(C1/C10/C11/G-S1/manifest_op.py)은 별도 세션.
