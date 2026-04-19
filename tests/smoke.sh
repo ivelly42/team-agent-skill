@@ -646,15 +646,59 @@ FIXTURES = [
     ("gtimeout prefix",            "gtimeout 300 codex exec -",                          True),
 ]
 
-# Codex 10차 [high] "fixture shrinkage" 방지: 예상 개수 명시적 assertion.
-# 향후 fixture 삭제가 silent regression을 일으키지 않도록 고정.
+import hashlib
+
+# Codex 10차 [high] fixture count pin — cardinality 변경 시 fail.
 EXPECTED_FIXTURE_COUNT = 15
 if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(
         f"FATAL: FIXTURES count regression — expected {EXPECTED_FIXTURE_COUNT}, got {len(FIXTURES)}",
         file=sys.stderr,
     )
-    print(f"  If intentional expansion/pruning, update EXPECTED_FIXTURE_COUNT.", file=sys.stderr)
+    print(f"  If intentional expansion/pruning, update EXPECTED_FIXTURE_COUNT + signature + required sets.", file=sys.stderr)
+    sys.exit(1)
+
+# Codex 11차 [medium] fixture identity pin — 내용 변경 시 fail.
+# 15개 count는 유지하면서 중요 bypass case를 weak한 걸로 swap하는 regression 차단.
+# (desc|cmd|expect) 튜플을 newline-join하여 SHA256. 의도적 수정 시 상수 업데이트 필요.
+EXPECTED_FIXTURE_SIGNATURE = "992739714d740e3b92a36015ed1f8240e048a3ce675afa233eee0bc374f63315"
+_sig_input = "\n".join(f"{d}|{c}|{e}" for d, c, e in FIXTURES)
+_actual_sig = hashlib.sha256(_sig_input.encode()).hexdigest()
+if _actual_sig != EXPECTED_FIXTURE_SIGNATURE:
+    print(f"FATAL: FIXTURES content drift (identity pin)", file=sys.stderr)
+    print(f"  expected signature: {EXPECTED_FIXTURE_SIGNATURE}", file=sys.stderr)
+    print(f"  actual signature:   {_actual_sig}", file=sys.stderr)
+    print(f"  의도적 fixture 수정이면 EXPECTED_FIXTURE_SIGNATURE 업데이트 (diff 검토 필수).", file=sys.stderr)
+    sys.exit(1)
+
+# 추가 의미론 가드: 중요 bypass case가 반드시 expect=True로 존재하는지.
+# signature 업데이트 시 실수로 critical case를 빼면 여기서도 걸린다 (이중 방어).
+REQUIRED_BYPASS_DESCS = {
+    "bash -lc wrapper", "sh -c wrapper", "zsh -c wrapper",
+    "env prefix wrapper", "nohup wrapper",
+    "bare codex call", "bare gemini call",
+    "FOO=1 timeout bypass", "gtimeout prefix",
+}
+REQUIRED_OK_DESCS = {
+    "direct codex child", "direct gemini child",
+    "quoted CLI in echo", "quoted gemini in echo",
+    "codex login (감사 대상 아님)", "gemini version (감사 대상 아님)",
+}
+_fixture_map = {d: (c, e) for d, c, e in FIXTURES}
+_identity_errors = []
+for required in REQUIRED_BYPASS_DESCS:
+    if required not in _fixture_map:
+        _identity_errors.append(f"missing REQUIRED_BYPASS: {required!r}")
+    elif _fixture_map[required][1] is not True:
+        _identity_errors.append(f"{required!r} must have expect=True, got {_fixture_map[required][1]}")
+for required in REQUIRED_OK_DESCS:
+    if required not in _fixture_map:
+        _identity_errors.append(f"missing REQUIRED_OK: {required!r}")
+    elif _fixture_map[required][1] is not False:
+        _identity_errors.append(f"{required!r} must have expect=False, got {_fixture_map[required][1]}")
+if _identity_errors:
+    print(f"FATAL: critical fixture identity violation(s):", file=sys.stderr)
+    for e in _identity_errors: print(f"  {e}", file=sys.stderr)
     sys.exit(1)
 
 failures = []

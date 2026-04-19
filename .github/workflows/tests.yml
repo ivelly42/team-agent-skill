@@ -1,0 +1,32 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    name: smoke + schema tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure bash + python3 (runner ships both)
+        run: |
+          bash --version
+          python3 --version
+
+      - name: Install jsonschema (schema validation full mode)
+        run: |
+          python3 -m pip install --user --quiet jsonschema
+          python3 -c "import jsonschema; print('jsonschema', jsonschema.__version__)"
+
+      - name: Run smoke tests
+        run: bash tests/smoke.sh
+
+      - name: Run schema validation tests
+        env:
+          TEAM_AGENT_SCHEMA_STRICT: "1"
+        run: bash tests/schema-validation.sh
