@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "cross-verification verdict output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verifications"],
+  "properties": {
+    "verifications": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["finding_id", "verdict", "rationale"],
+        "properties": {
+          "finding_id": { "type": "string" },
+          "verdict": { "type": "string", "enum": ["confirmed", "disagree_severity", "not_an_issue"] },
+          "suggested_severity": { "type": "string", "enum": ["Critical", "High", "Medium", "Low", "Info"] },
+          "rationale": { "type": "string", "maxLength": 500 },
+          "code_quote": { "type": "string", "maxLength": 500 }
+        }
+      }
+    }
+  }
+}
