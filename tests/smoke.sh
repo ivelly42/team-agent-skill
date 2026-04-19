@@ -203,40 +203,78 @@ test_grep_batch_args() {
 # Test 8: 모든 backend CLI 호출 (codex exec, gemini -p) 가 timeout 래퍼로 가드됨
 # ───────────────────────────────────────────────────────────
 # Codex adversarial가 반복적으로 찾아낸 "unwrapped subprocess" 패턴을 lint로 고정.
-# SKILL.md와 refs/*.md에서 codex exec / gemini -p 가 등장하는 줄마다 앞쪽 ~20줄 안에
-# `_run_with_timeout` 호출이 있어야 한다. 없으면 regression.
+# 엄격한 규칙: ```bash fenced block 안의 backend CLI 호출은
+#   1) 같은 블록 내에 `_run_with_timeout` 함수 호출(정의 아닌)이 있고
+#   2) 해당 CLI가 그 호출의 argv로 전달돼야 한다 (prefix `timeout`/`gtimeout` 직접 사용도 fail).
+# 코멘트 (#로 시작) · 마크다운 테이블 · prose는 모두 제외.
 test_backend_calls_timeout_guarded() {
-    local name="unwrapped backend CLI 감지 (codex exec / gemini -p 가 timeout 가드됨)"
+    local name="unwrapped backend CLI 감지 (structural lint)"
     local files=("$SKILL_DIR/SKILL.md" "$SKILL_DIR/refs/codex-verification.md" \
                  "$SKILL_DIR/refs/cross-verification.md" "$SKILL_DIR/refs/gemini-verification.md")
-    local unguarded=()
 
-    for f in "${files[@]}"; do
-        [ -f "$f" ] || continue
-        # codex exec / gemini -p 패턴 (단독 줄로 시작하거나 backslash 연결 직전)
-        # 단, 설명·help 텍스트·주석·table 안의 언급은 제외: 앞에 "#" 또는 table `|` 있는 줄
-        # 'docs text' context까지 스킵하는 근사법: awk로 라인 추출 + 이전 20줄 검사
-        while IFS=: read -r line_no _; do
-            [ -z "$line_no" ] && continue
-            # 설명 prose 패턴 제외 (한글 포함 / "설명" / 표 / 인용)
-            local context; context=$(sed -n "${line_no}p" "$f")
-            case "$context" in
-                *"|"*"|"*)            continue ;;     # 마크다운 테이블 행
-                "> "*|">  "*)         continue ;;     # 인용 블록
-                *"설명"*|*"예시"*|*"참고"*) continue ;;
-            esac
-            # 이전 20줄 안에 _run_with_timeout 있는지
-            local start=$((line_no - 20)); [ "$start" -lt 1 ] && start=1
-            if ! sed -n "${start},${line_no}p" "$f" | grep -q "_run_with_timeout\|timeout-wrapper"; then
-                unguarded+=("$f:$line_no → $context")
-            fi
-        done < <(grep -n -E '^[[:space:]]*(codex exec|gemini -m gemini|gemini -p -)' "$f" 2>/dev/null)
-    done
+    python3 - "${files[@]}" <<'PYEOF'
+import re, sys
+files = sys.argv[1:]
+# backend CLI를 argv로 받는 실제 invocation 패턴 (코드펜스 내부, 코멘트 제외)
+CLI_RE = re.compile(r'\b(codex\s+exec|gemini\s+-(?:m\s+\S+\s+)?(?:--json-schema\s+\S+\s+)?-p)\b')
+violations = []
 
-    if [ "${#unguarded[@]}" = "0" ]; then
+for path in files:
+    try:
+        with open(path, encoding='utf-8') as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        continue
+
+    # ```bash ... ``` 블록 추출
+    in_bash = False
+    block_start = 0
+    block_lines = []
+    blocks = []  # [(start_lineno, [lines])]
+    for i, ln in enumerate(lines, 1):
+        if ln.strip().startswith('```bash'):
+            in_bash = True; block_start = i; block_lines = []
+            continue
+        if in_bash and ln.strip() == '```':
+            blocks.append((block_start, block_lines))
+            in_bash = False
+            continue
+        if in_bash:
+            block_lines.append((i, ln))
+
+    for bstart, blines in blocks:
+        # 블록 내 raw text (코멘트 라인 제외)
+        non_comment_text = ''.join(
+            raw for _, raw in blines if not raw.lstrip().startswith('#')
+        )
+        # 블록이 _run_with_timeout을 **호출**하는가? (정의가 아닌 사용)
+        # 정의 패턴: `_run_with_timeout() {`
+        # 호출 패턴: `_run_with_timeout 60 30 ...`
+        has_call = re.search(r'_run_with_timeout\s+\d', non_comment_text) is not None
+
+        # 블록 내 backend CLI 등장
+        for lineno, raw in blines:
+            if raw.lstrip().startswith('#'):
+                continue
+            if CLI_RE.search(raw):
+                # bare `timeout <N>` prefix 허용 안 함 (일관성: _run_with_timeout만)
+                if not has_call:
+                    violations.append(f"{path}:{lineno} → {raw.rstrip()} [block at L{bstart}: no _run_with_timeout call]")
+                    continue
+                # prefix가 bare timeout / gtimeout인지 확인 → violation
+                if re.match(r'^\s*(timeout|gtimeout)\s+\d', raw):
+                    violations.append(f"{path}:{lineno} → {raw.rstrip()} [bare timeout prefix, use _run_with_timeout]")
+
+if violations:
+    for v in violations: print(v, file=sys.stderr)
+    sys.exit(1)
+sys.exit(0)
+PYEOF
+    local rc=$?
+    if [ "$rc" = "0" ]; then
         _pass "$name"
     else
-        _fail "$name" "unguarded 발견: ${unguarded[*]}"
+        _fail "$name" "violations above"
     fi
 }
 

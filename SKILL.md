@@ -1218,28 +1218,86 @@ def extract_codemap_json(text):
 **Codex exec** (`--codex` 지정 시):
 
 ```bash
+# 3-tier timeout wrapper (refs/timeout-wrapper.sh와 동일). 일관성을 위해 Phase 0.3도
+# 동일 `_run_with_timeout` 사용 — bare `timeout` 명령은 GNU coreutils 없는 환경에서 hang.
+_TIMEOUT_BIN=""
+command -v timeout >/dev/null 2>&1 && _TIMEOUT_BIN="timeout"
+[ -z "$_TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && _TIMEOUT_BIN="gtimeout"
+_run_with_timeout() {
+  local _secs="$1"; shift; local _grace="$1"; shift
+  if [ -n "$_TIMEOUT_BIN" ]; then
+    "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"; return $?
+  fi
+  python3 -c '
+import os, signal, subprocess, sys
+secs=int(sys.argv[1]); grace=int(sys.argv[2]); cmd=sys.argv[3:]
+try: p=subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
+except FileNotFoundError: sys.exit(127)
+try: sys.exit(p.wait(timeout=secs))
+except subprocess.TimeoutExpired:
+    try: os.killpg(p.pid, signal.SIGTERM)
+    except ProcessLookupError: pass
+    try: p.wait(timeout=grace); sys.exit(124)
+    except subprocess.TimeoutExpired:
+        try: os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError: pass
+        p.wait(); sys.exit(137)
+' "$_secs" "$_grace" "$@"
+  return $?
+}
+
 _SCHEMA="${_SKILL_DIR}/refs/codemap-schema.json"
 _EXEC_DIR="${SCOPE_PATH:-$_PROJECT_DIR}"
 
-timeout 60 codex exec - -s read-only -C "$_EXEC_DIR" \
-  --output-schema "$_SCHEMA" -o "$_CODEMAP" \
-  --skip-git-repo-check < "/tmp/ta-${_RUN_ID}-codemap-prompt.txt"
+_run_with_timeout 60 10 \
+  codex exec - -s read-only -C "$_EXEC_DIR" \
+    --output-schema "$_SCHEMA" -o "$_CODEMAP" \
+    --skip-git-repo-check < "/tmp/ta-${_RUN_ID}-codemap-prompt.txt"
 _CODEMAP_RC=$?
 ```
 
 **Gemini -p** (`--gemini` 또는 `--cross` 지정 시):
 
 ```bash
-_SCHEMA="${_SKILL_DIR}/refs/codemap-schema.json"
+# 동일 3-tier 래퍼 (inline). 일관성 + Phase 0.3에서도 hang-closed.
+_TIMEOUT_BIN=""
+command -v timeout >/dev/null 2>&1 && _TIMEOUT_BIN="timeout"
+[ -z "$_TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && _TIMEOUT_BIN="gtimeout"
+_run_with_timeout() {
+  local _secs="$1"; shift; local _grace="$1"; shift
+  if [ -n "$_TIMEOUT_BIN" ]; then
+    "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"; return $?
+  fi
+  python3 -c '
+import os, signal, subprocess, sys
+secs=int(sys.argv[1]); grace=int(sys.argv[2]); cmd=sys.argv[3:]
+try: p=subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
+except FileNotFoundError: sys.exit(127)
+try: sys.exit(p.wait(timeout=secs))
+except subprocess.TimeoutExpired:
+    try: os.killpg(p.pid, signal.SIGTERM)
+    except ProcessLookupError: pass
+    try: p.wait(timeout=grace); sys.exit(124)
+    except subprocess.TimeoutExpired:
+        try: os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError: pass
+        p.wait(); sys.exit(137)
+' "$_secs" "$_grace" "$@"
+  return $?
+}
 
+_SCHEMA="${_SKILL_DIR}/refs/codemap-schema.json"
 _CODEMAP_STDERR="/tmp/ta-${_RUN_ID}-codemap-stderr.log"
 : > "$_CODEMAP_STDERR" && chmod 600 "$_CODEMAP_STDERR"
+
 if [ "$GEMINI_HAS_SCHEMA" -gt 0 ]; then
-  timeout 60 gemini -m gemini-3.1-flash-lite-preview --json-schema "$_SCHEMA" \
-    -p - < "/tmp/ta-${_RUN_ID}-codemap-prompt.txt" > "$_CODEMAP" 2>"$_CODEMAP_STDERR"
+  _run_with_timeout 60 10 \
+    gemini -m gemini-3.1-flash-lite-preview --json-schema "$_SCHEMA" \
+      -p - < "/tmp/ta-${_RUN_ID}-codemap-prompt.txt" > "$_CODEMAP" 2>"$_CODEMAP_STDERR"
 else
-  timeout 60 gemini -m gemini-3.1-flash-lite-preview \
-    -p - < "/tmp/ta-${_RUN_ID}-codemap-prompt.txt" > "$_CODEMAP" 2>"$_CODEMAP_STDERR"
+  _run_with_timeout 60 10 \
+    gemini -m gemini-3.1-flash-lite-preview \
+      -p - < "/tmp/ta-${_RUN_ID}-codemap-prompt.txt" > "$_CODEMAP" 2>"$_CODEMAP_STDERR"
 fi
 _CODEMAP_RC=$?
 ```
