@@ -189,6 +189,12 @@ ARGUMENTS에서 다음 플래그를 추출하고 나머지를 `TASK_PURPOSE` 후
   - `hybrid` (기본): 정밀 분석(×1.5 가중치) → Claude Agent, 나머지 → codex exec
   - `all`: 전원 codex exec (비용 최소, 정밀도 하락)
 - `--diff [base]` → `DIFF_BASE=<base>` (변경 파일만 분석. 기본: HEAD~1. 브랜치명 지정 가능. 변경파일 + import 1-hop + 계약파일 자동 확장. PR 리뷰 용도.)
+- `--gemini [all|hybrid]` → `GEMINI_MODE=all|hybrid` (기본: hybrid). `command -v gemini` 실패 시 경고 후 무시. `--codex`와 동시 사용 불가.
+  - `hybrid` (기본): 정밀(×1.5) → Claude, 문서/탐색(×0.5~0.7) → Gemini Flash, 나머지 → Claude
+  - `all`: 전원 Gemini (비용 최소, 정밀도 하락)
+- `--cross` → `CROSS_MODE=true` (3-way 하이브리드 + 3중 검증 자동). `--codex`·`--gemini`와 상호 배타.
+  - 정밀(×1.5) → Claude, 구조(×1.0) → Codex, 문서/탐색(×0.5~0.7) → Gemini
+  - Phase 4-A-2에서 Codex + Gemini 2명 동시 독립 검증 + 2/3 다수결 합의
 
 ### 1-1.5. 플래그 조합 규칙
 
@@ -215,6 +221,16 @@ ARGUMENTS에서 다음 플래그를 추출하고 나머지를 `TASK_PURPOSE` 후
 | `--codex` + 권한 A(bypassPermissions) | **충돌**. codex exec에 worktree 격리 없음. 읽기 전용 강제 + 경고 |
 | `--codex` + `--resume` | 허용. manifest의 `agent_backends` 딕셔너리로 원래 백엔드 복원 |
 | `--codex` 미설치 | 경고 "codex CLI 미설치 — Claude Agent로 폴백" 후 정상 진행 |
+| `--codex` + `--gemini` | **충돌**. "두 플래그 동시 사용 불가. 3개 모두 원하면 `--cross`" 경고 후 종료 |
+| `--cross` + `--codex` | **충돌**. `--cross`가 이미 Codex 포함 |
+| `--cross` + `--gemini` | **충돌**. `--cross`가 이미 Gemini 포함 |
+| `--gemini` 미설치 | 경고 "gemini CLI 미설치 — Claude로 폴백" 후 진행. `--cross`는 Codex 전용 2중 검증으로 다운그레이드 |
+| `--gemini` + 권한 A (bypassPermissions) | **충돌**. gemini에 worktree 격리 없음. 읽기 전용 강제 + 경고 |
+| `--cross` + 권한 A | **충돌**. 동일 사유 (Codex·Gemini 모두 격리 없음). 읽기 전용 강제 + 경고 |
+| `--gemini` + `--resume` | 허용. manifest의 `agent_backends` 딕셔너리로 원래 백엔드 복원 |
+| `--cross` + `--resume` | 허용. manifest의 `cross_mode`·`agent_backends`·`codemap_backend` 복원 |
+| `--cross` + `--auto` | 허용. 권한 B(읽기 전용) 강제 |
+| `--gemini`/`--cross` + `--scope`·`--diff`·`--dry-run`·`--deep`·`--notify` | 허용. 각 플래그 원래 의미 유지 |
 
 ### 1-2. 목적 결정
 
