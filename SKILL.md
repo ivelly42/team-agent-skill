@@ -1230,18 +1230,27 @@ _run_with_timeout() {
   fi
   python3 -c '
 import os, signal, subprocess, sys
-secs=int(sys.argv[1]); grace=int(sys.argv[2]); cmd=sys.argv[3:]
-try: p=subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
-except FileNotFoundError: sys.exit(127)
-try: sys.exit(p.wait(timeout=secs))
+secs = int(sys.argv[1]); grace = int(sys.argv[2]); cmd = sys.argv[3:]
+if not cmd:
+    print("[team-agent] _run_with_timeout: empty cmd", file=sys.stderr); sys.exit(2)
+try:
+    p = subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
+except FileNotFoundError as e:
+    print(f"[team-agent] cmd not found: {e}", file=sys.stderr); sys.exit(127)
+try:
+    rc = p.wait(timeout=secs)
+    sys.exit(rc)
 except subprocess.TimeoutExpired:
     try: os.killpg(p.pid, signal.SIGTERM)
     except ProcessLookupError: pass
-    try: p.wait(timeout=grace); sys.exit(124)
+    try:
+        rc = p.wait(timeout=grace)
+        sys.exit(124 if rc in (0, -signal.SIGTERM) else rc)
     except subprocess.TimeoutExpired:
         try: os.killpg(p.pid, signal.SIGKILL)
         except ProcessLookupError: pass
-        p.wait(); sys.exit(137)
+        p.wait()
+        sys.exit(137)
 ' "$_secs" "$_grace" "$@"
   return $?
 }
@@ -1270,18 +1279,27 @@ _run_with_timeout() {
   fi
   python3 -c '
 import os, signal, subprocess, sys
-secs=int(sys.argv[1]); grace=int(sys.argv[2]); cmd=sys.argv[3:]
-try: p=subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
-except FileNotFoundError: sys.exit(127)
-try: sys.exit(p.wait(timeout=secs))
+secs = int(sys.argv[1]); grace = int(sys.argv[2]); cmd = sys.argv[3:]
+if not cmd:
+    print("[team-agent] _run_with_timeout: empty cmd", file=sys.stderr); sys.exit(2)
+try:
+    p = subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
+except FileNotFoundError as e:
+    print(f"[team-agent] cmd not found: {e}", file=sys.stderr); sys.exit(127)
+try:
+    rc = p.wait(timeout=secs)
+    sys.exit(rc)
 except subprocess.TimeoutExpired:
     try: os.killpg(p.pid, signal.SIGTERM)
     except ProcessLookupError: pass
-    try: p.wait(timeout=grace); sys.exit(124)
+    try:
+        rc = p.wait(timeout=grace)
+        sys.exit(124 if rc in (0, -signal.SIGTERM) else rc)
     except subprocess.TimeoutExpired:
         try: os.killpg(p.pid, signal.SIGKILL)
         except ProcessLookupError: pass
-        p.wait(); sys.exit(137)
+        p.wait()
+        sys.exit(137)
 ' "$_secs" "$_grace" "$@"
   return $?
 }
@@ -1463,18 +1481,27 @@ _run_with_timeout() {
   # prompt 대신 EOF 수신. stdin=sys.stdin으로 명시 상속.
   python3 -c '
 import os, signal, subprocess, sys
-secs=int(sys.argv[1]); grace=int(sys.argv[2]); cmd=sys.argv[3:]
-try: p=subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
-except FileNotFoundError: sys.exit(127)
-try: sys.exit(p.wait(timeout=secs))
+secs = int(sys.argv[1]); grace = int(sys.argv[2]); cmd = sys.argv[3:]
+if not cmd:
+    print("[team-agent] _run_with_timeout: empty cmd", file=sys.stderr); sys.exit(2)
+try:
+    p = subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
+except FileNotFoundError as e:
+    print(f"[team-agent] cmd not found: {e}", file=sys.stderr); sys.exit(127)
+try:
+    rc = p.wait(timeout=secs)
+    sys.exit(rc)
 except subprocess.TimeoutExpired:
     try: os.killpg(p.pid, signal.SIGTERM)
     except ProcessLookupError: pass
-    try: p.wait(timeout=grace); sys.exit(124)
+    try:
+        rc = p.wait(timeout=grace)
+        sys.exit(124 if rc in (0, -signal.SIGTERM) else rc)
     except subprocess.TimeoutExpired:
         try: os.killpg(p.pid, signal.SIGKILL)
         except ProcessLookupError: pass
-        p.wait(); sys.exit(137)
+        p.wait()
+        sys.exit(137)
 ' "$_secs" "$_grace" "$@"
   return $?
 }
@@ -1530,18 +1557,27 @@ _run_with_timeout() {
   fi
   python3 -c '
 import os, signal, subprocess, sys
-secs=int(sys.argv[1]); grace=int(sys.argv[2]); cmd=sys.argv[3:]
-try: p=subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
-except FileNotFoundError: sys.exit(127)
-try: sys.exit(p.wait(timeout=secs))
+secs = int(sys.argv[1]); grace = int(sys.argv[2]); cmd = sys.argv[3:]
+if not cmd:
+    print("[team-agent] _run_with_timeout: empty cmd", file=sys.stderr); sys.exit(2)
+try:
+    p = subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
+except FileNotFoundError as e:
+    print(f"[team-agent] cmd not found: {e}", file=sys.stderr); sys.exit(127)
+try:
+    rc = p.wait(timeout=secs)
+    sys.exit(rc)
 except subprocess.TimeoutExpired:
     try: os.killpg(p.pid, signal.SIGTERM)
     except ProcessLookupError: pass
-    try: p.wait(timeout=grace); sys.exit(124)
+    try:
+        rc = p.wait(timeout=grace)
+        sys.exit(124 if rc in (0, -signal.SIGTERM) else rc)
     except subprocess.TimeoutExpired:
         try: os.killpg(p.pid, signal.SIGKILL)
         except ProcessLookupError: pass
-        p.wait(); sys.exit(137)
+        p.wait()
+        sys.exit(137)
 ' "$_secs" "$_grace" "$@"
   return $?
 }

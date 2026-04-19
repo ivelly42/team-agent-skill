@@ -21,4 +21,4 @@
 ```
 
 ## Current Status
-[2026-04-20] Codex adversarial 3 findings 전부 수정 (commit d6c26b5): #1 --cross timeout/fallback 매트릭스 구현, #2 Ultra 실패 shape-stable contract + schema 업데이트, #3 schema-validation.sh 하드게이트(TEAM_AGENT_SCHEMA_STRICT=0 opt-in SKIP). smoke 7/7 + schema 6/6. 3 Codex 경로 모두 silent failure 제거. 잔여 아키텍처 항목(C1/C10/C11/G-S1/manifest_op.py)은 별도 세션.
+[2026-04-20] Codex 7차 findings 2건 수정: (1) Test 8 command-level state machine 재작성 — `FOO=1 timeout 300 codex exec` · `env timeout` prefix 포함 모든 비-`_run_with_timeout` launcher 거부, (2) SKILL.md 4곳 + codex/gemini-verification.md 인라인 watchdog body를 canonical(refs/timeout-wrapper.sh)과 byte-parity 동기화 — `if not cmd` empty guard, `cmd not found` diagnostic, `124 if rc in (0, -SIGTERM)` 정규화 추가. Test 9 parity 추가. smoke 9/9 + schema 6/6 = 15 PASS. Codex 8차 검증 대기.

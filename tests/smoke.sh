@@ -200,37 +200,35 @@ test_grep_batch_args() {
 }
 
 # ───────────────────────────────────────────────────────────
-# Test 8: 모든 backend CLI 호출 (codex exec, gemini -p) 가 timeout 래퍼로 가드됨
+# Test 8: 모든 backend CLI 호출 (codex exec, gemini -p) 이 _run_with_timeout으로 launch됨
 # ───────────────────────────────────────────────────────────
-# Codex adversarial가 반복적으로 찾아낸 "unwrapped subprocess" 패턴을 lint로 고정.
-# 엄격한 규칙: ```bash fenced block 안의 backend CLI 호출은
-#   1) 같은 블록 내에 `_run_with_timeout` 함수 호출(정의 아닌)이 있고
-#   2) 해당 CLI가 그 호출의 argv로 전달돼야 한다 (prefix `timeout`/`gtimeout` 직접 사용도 fail).
-# 코멘트 (#로 시작) · 마크다운 테이블 · prose는 모두 제외.
+# Codex 7차 adversarial이 재지적한 허점 해결:
+#   (a) 이전 버전: 블록에 wrapper 호출 1개만 있으면 같은 블록의 unwrapped call도 통과
+#   (b) 이전 버전: `FOO=1 timeout 300 codex exec`, `env timeout ...` 등 prefix 형태 놓침
+# 새 규칙: bash 블록을 shell command 단위로 split한 뒤, backend CLI가 등장하는 각
+# command의 "첫 실행 토큰(variable assignment prefix 제외)"이 `_run_with_timeout`
+# 여야만 한다. `timeout`/`gtimeout`/`env`/`codex`/`gemini` 등 다른 값이면 violation.
 test_backend_calls_timeout_guarded() {
-    local name="unwrapped backend CLI 감지 (structural lint)"
+    local name="unwrapped backend CLI 감지 (command-level state machine)"
     local files=("$SKILL_DIR/SKILL.md" "$SKILL_DIR/refs/codex-verification.md" \
                  "$SKILL_DIR/refs/cross-verification.md" "$SKILL_DIR/refs/gemini-verification.md")
 
     python3 - "${files[@]}" <<'PYEOF'
 import re, sys
 files = sys.argv[1:]
-# backend CLI를 argv로 받는 실제 invocation 패턴 (코드펜스 내부, 코멘트 제외)
-CLI_RE = re.compile(r'\b(codex\s+exec|gemini\s+-(?:m\s+\S+\s+)?(?:--json-schema\s+\S+\s+)?-p)\b')
+
+# backend CLI invocation (argv로 실제 실행되는 형태)
+CLI_RE = re.compile(r'\b(codex\s+exec|gemini\s+(?:-m\s+\S+\s+)?(?:--json-schema\s+\S+\s+)?-p)\b')
+# 허용되는 유일한 launcher
+ALLOWED_LAUNCHER = '_run_with_timeout'
+
 violations = []
 
-for path in files:
-    try:
-        with open(path, encoding='utf-8') as f:
-            lines = f.readlines()
-    except FileNotFoundError:
-        continue
-
-    # ```bash ... ``` 블록 추출
+def extract_bash_blocks(lines):
+    blocks = []
     in_bash = False
     block_start = 0
     block_lines = []
-    blocks = []  # [(start_lineno, [lines])]
     for i, ln in enumerate(lines, 1):
         if ln.strip().startswith('```bash'):
             in_bash = True; block_start = i; block_lines = []
@@ -241,31 +239,108 @@ for path in files:
             continue
         if in_bash:
             block_lines.append((i, ln))
+    return blocks
 
-    for bstart, blines in blocks:
-        # 블록 내 raw text (코멘트 라인 제외)
-        non_comment_text = ''.join(
-            raw for _, raw in blines if not raw.lstrip().startswith('#')
-        )
-        # 블록이 _run_with_timeout을 **호출**하는가? (정의가 아닌 사용)
-        # 정의 패턴: `_run_with_timeout() {`
-        # 호출 패턴: `_run_with_timeout 60 30 ...`
-        has_call = re.search(r'_run_with_timeout\s+\d', non_comment_text) is not None
+def split_commands(block_lines):
+    """bash 블록을 논리적 shell command 단위로 쪼갠다.
+    처리:
+      - `#`로 시작하는 주석 줄 제거
+      - `\\` 라인 끝 continuation 병합
+      - 따옴표 밖 `;`, `&&`, `||`, `|`, `&`에서 분할
+      - backslash escape 존중
+      - python heredoc `'...'` 내부의 단일 따옴표도 literal로 취급
+    """
+    processed = []
+    for lineno, raw in block_lines:
+        s = raw.rstrip('\n')
+        if s.lstrip().startswith('#'):
+            continue
+        processed.append((lineno, s))
 
-        # 블록 내 backend CLI 등장
-        for lineno, raw in blines:
-            if raw.lstrip().startswith('#'):
+    # line continuation 병합
+    merged = []
+    i = 0
+    while i < len(processed):
+        start_line, text = processed[i]
+        while text.rstrip().endswith('\\') and i + 1 < len(processed):
+            text = text.rstrip()[:-1]
+            i += 1
+            text = text + ' ' + processed[i][1]
+        merged.append((start_line, text))
+        i += 1
+
+    commands = []
+    for lineno, text in merged:
+        buf = ''
+        j = 0
+        in_single = False
+        in_double = False
+        pieces = []
+        n = len(text)
+        while j < n:
+            ch = text[j]
+            if ch == '\\' and j + 1 < n:
+                buf += ch + text[j+1]
+                j += 2
                 continue
-            if CLI_RE.search(raw):
-                # bare `timeout <N>` prefix 허용 안 함 (일관성: _run_with_timeout만)
-                if not has_call:
-                    violations.append(f"{path}:{lineno} → {raw.rstrip()} [block at L{bstart}: no _run_with_timeout call]")
-                    continue
-                # prefix가 bare timeout / gtimeout인지 확인 → violation
-                if re.match(r'^\s*(timeout|gtimeout)\s+\d', raw):
-                    violations.append(f"{path}:{lineno} → {raw.rstrip()} [bare timeout prefix, use _run_with_timeout]")
+            if ch == "'" and not in_double:
+                in_single = not in_single
+                buf += ch; j += 1; continue
+            if ch == '"' and not in_single:
+                in_double = not in_double
+                buf += ch; j += 1; continue
+            if not in_single and not in_double:
+                if ch == ';':
+                    pieces.append(buf); buf = ''; j += 1; continue
+                if ch == '&' and j+1 < n and text[j+1] == '&':
+                    pieces.append(buf); buf = ''; j += 2; continue
+                if ch == '|' and j+1 < n and text[j+1] == '|':
+                    pieces.append(buf); buf = ''; j += 2; continue
+                if ch == '|':
+                    pieces.append(buf); buf = ''; j += 1; continue
+                if ch == '&':
+                    pieces.append(buf); buf = ''; j += 1; continue
+            buf += ch; j += 1
+        if buf.strip():
+            pieces.append(buf)
+        for p in pieces:
+            if p.strip():
+                commands.append((lineno, p.strip()))
+    return commands
+
+def first_executable(cmd_text):
+    """variable assignment / 관용 modifier를 건너뛴 첫 실행 토큰."""
+    tokens = cmd_text.split()
+    # 관용 modifier / 서브셸 진입 토큰 skip
+    while tokens and tokens[0] in ('!', 'time', '(', '((', '{', 'exec', 'eval'):
+        tokens = tokens[1:]
+    # variable assignment prefix (VAR=VAL) skip
+    while tokens and re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', tokens[0]):
+        tokens = tokens[1:]
+    return tokens[0] if tokens else None
+
+for path in files:
+    try:
+        with open(path, encoding='utf-8') as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        continue
+
+    for block_start, block_lines in extract_bash_blocks(lines):
+        for cmd_lineno, cmd in split_commands(block_lines):
+            if not CLI_RE.search(cmd):
+                continue
+            first = first_executable(cmd)
+            if first == ALLOWED_LAUNCHER:
+                continue
+            # first가 None 이면 단순 arg 전달 등 (거의 없음)
+            shown = first if first is not None else '<none>'
+            violations.append(
+                f"{path}:{cmd_lineno} first_exec={shown!r} :: {cmd[:140]}"
+            )
 
 if violations:
+    print(f"[test_8] {len(violations)} unwrapped backend invocation(s):", file=sys.stderr)
     for v in violations: print(v, file=sys.stderr)
     sys.exit(1)
 sys.exit(0)
@@ -275,6 +350,65 @@ PYEOF
         _pass "$name"
     else
         _fail "$name" "violations above"
+    fi
+}
+
+# ───────────────────────────────────────────────────────────
+# Test 9: timeout wrapper parity — 모든 인라인 복사본의 Python watchdog body가
+# canonical (refs/timeout-wrapper.sh)의 핵심 3요소를 포함해야 함.
+# Codex 7차 adversarial [medium] drift 해결.
+# ───────────────────────────────────────────────────────────
+test_timeout_wrapper_parity() {
+    local name="canonical ↔ 인라인 wrapper parity (핵심 불변량)"
+    local files=("$SKILL_DIR/SKILL.md" "$SKILL_DIR/refs/codex-verification.md" \
+                 "$SKILL_DIR/refs/cross-verification.md" "$SKILL_DIR/refs/gemini-verification.md" \
+                 "$SKILL_DIR/refs/timeout-wrapper.sh")
+
+    python3 - "${files[@]}" <<'PYEOF'
+import re, sys
+files = sys.argv[1:]
+
+# 모든 인라인 복사본이 반드시 포함해야 하는 불변량 (canonical의 의미론적 핵심).
+INVARIANTS = [
+    (r'\bif not cmd\b',                               'empty cmd guard'),
+    (r'cmd not found',                                'FileNotFoundError diagnostic'),
+    (r'124\s+if\s+rc\s+in\s+\(0,\s*-signal\.SIGTERM', 'SIGTERM exit normalization'),
+    (r'sys\.exit\(127\)',                             '127 on cmd not found'),
+    (r'sys\.exit\(137\)',                             '137 on SIGKILL'),
+    (r'start_new_session=True',                       'own process group'),
+    (r'stdin=sys\.stdin',                             'stdin inheritance'),
+]
+
+# 각 파일에서 python3 -c '...' literal 안의 body들을 추출
+PY_BODY_RE = re.compile(r"python3\s+-c\s+'\n(.*?)\n'\s*\"\$_secs\"", re.DOTALL)
+
+fail = []
+for path in files:
+    try:
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+    except FileNotFoundError:
+        fail.append(f"{path}: file missing")
+        continue
+    bodies = PY_BODY_RE.findall(text)
+    if not bodies:
+        fail.append(f"{path}: no inline python3 -c watchdog body found")
+        continue
+    for idx, body in enumerate(bodies, 1):
+        for pat, label in INVARIANTS:
+            if not re.search(pat, body):
+                fail.append(f"{path} body#{idx}: missing invariant '{label}' (pattern: {pat})")
+
+if fail:
+    for f in fail: print(f, file=sys.stderr)
+    sys.exit(1)
+sys.exit(0)
+PYEOF
+    local rc=$?
+    if [ "$rc" = "0" ]; then
+        _pass "$name"
+    else
+        _fail "$name" "parity violations above"
     fi
 }
 
@@ -293,6 +427,7 @@ test_schema_structure
 test_meta_mode_env_override
 test_grep_batch_args
 test_backend_calls_timeout_guarded
+test_timeout_wrapper_parity
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 total=$((PASS+FAIL))
