@@ -99,34 +99,35 @@ _run_with_timeout() {
   fi
 
   # Python watchdog fallback — hang 방지 필수. GNU coreutils 없는 bare macOS에서도 작동.
-  # 자식 프로세스 그룹을 생성해 하위 프로세스까지 SIGTERM/SIGKILL 정리.
-  python3 - "$_secs" "$_grace" "$@" <<'PYEOF'
-import os, signal, subprocess, sys, time
+  # CRITICAL: `python3 -c` 사용 (heredoc 금지). heredoc을 쓰면 Python의 fd 0이 heredoc 바이트로 대체되어
+  # 자식 프로세스(codex exec -, gemini -p -)가 prompt 대신 EOF를 받는다.
+  # `-c`는 script를 argv로 전달하므로 stdin이 보존되고, Popen이 기본적으로 fd 0을 상속한다.
+  python3 -c '
+import os, signal, subprocess, sys
 secs = int(sys.argv[1]); grace = int(sys.argv[2]); cmd = sys.argv[3:]
 if not cmd:
     print("[team-agent] _run_with_timeout: empty cmd", file=sys.stderr); sys.exit(2)
 try:
-    # start_new_session=True → 자체 프로세스 그룹 (하위 process group 일괄 정리 가능)
-    p = subprocess.Popen(cmd, start_new_session=True)
+    # stdin은 명시적으로 상속 — `codex exec -`, `gemini -p -`는 prompt를 fd 0으로 읽는다.
+    # start_new_session=True → 자체 프로세스 그룹 (하위 process 일괄 정리 가능).
+    p = subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
 except FileNotFoundError as e:
     print(f"[team-agent] cmd not found: {e}", file=sys.stderr); sys.exit(127)
 try:
     rc = p.wait(timeout=secs)
     sys.exit(rc)
 except subprocess.TimeoutExpired:
-    # SIGTERM to whole process group
     try: os.killpg(p.pid, signal.SIGTERM)
     except ProcessLookupError: pass
     try:
         rc = p.wait(timeout=grace)
         sys.exit(124 if rc in (0, -signal.SIGTERM) else rc)
     except subprocess.TimeoutExpired:
-        # Grace expired → SIGKILL group
         try: os.killpg(p.pid, signal.SIGKILL)
         except ProcessLookupError: pass
         p.wait()
-        sys.exit(137)  # GNU convention for SIGKILL
-PYEOF
+        sys.exit(137)
+' "$_secs" "$_grace" "$@"
   return $?
 }
 
