@@ -361,23 +361,24 @@ for path in files:
 
     for block_start, block_lines in extract_bash_blocks(lines):
         for cmd_lineno, cmd in split_commands(block_lines):
-            # Pre-check: CLI substring이 원본(quoted 포함)에 없으면 감사 대상 아님.
-            # `codex login`, `gemini config` 등 backend agent 호출 아닌 subcommand 제외.
-            if not CLI_RE.search(cmd):
-                continue
-            # 두 경로 검사 (9차 [high] 해결):
-            # Pass A: command가 _run_with_timeout으로 시작하면 argv child 검증.
-            #         CLI가 quoted payload 안에만 있어도 `bash -lc 'codex exec'` 형태를 잡는다.
-            # Pass B: _run_with_timeout이 아닌데 unquoted에도 CLI가 등장하면 unwrapped 호출 위반.
             leading = strip_leading_modifiers(cmd.split())
             starts_with_wrapper = bool(leading) and leading[0] == ALLOWED_LAUNCHER
+
+            # Pass A (Codex 12차 [high] 해결): `_run_with_timeout`으로 시작하는
+            # 모든 command를 CLI_RE 여부 무관하게 child 검증. 이유: variable/function
+            # indirection(`_run_with_timeout 300 30 bash -lc "$CMD"`, `_run_with_timeout
+            # 300 30 run_backend`)은 CLI 문자열이 text에 없으므로 CLI_RE pre-check으로는
+            # 못 잡는다. child가 codex/gemini가 아니면 무조건 violation.
             if starts_with_wrapper:
                 ok, reason = validate_wrapped(cmd)
                 if not ok:
                     violations.append(f"{path}:{cmd_lineno} {reason} :: {cmd[:140]}")
                 continue
-            # wrapper로 시작 안 함 + CLI 언급 있음 → unquoted에서도 매치되면 실제 exec,
-            # quoted 안에만 있으면 prose/doc string 으로 OK.
+
+            # Pass B: wrapper로 시작 안 함 + CLI_RE 매치 있음 → unwrapped 호출 의심.
+            # 단 quoted literal 내 prose (`echo "codex exec"`)는 제외.
+            if not CLI_RE.search(cmd):
+                continue
             cmd_unquoted = strip_quoted_regions(cmd)
             if CLI_RE.search(cmd_unquoted):
                 first = leading[0] if leading else '<none>'
@@ -614,42 +615,47 @@ def strip_quoted_regions(text):
     return ''.join(out)
 
 def check_violation(cmd):
-    """Test 8의 pre-check + 2-pass 로직과 동일. True = violation."""
-    if not CLI_RE.search(cmd):
-        return False  # 감사 대상 아님
+    """Test 8의 Pass A(wrapper unconditional) + Pass B(non-wrapper CLI_RE) 로직.
+    True = violation."""
     leading = strip_leading_modifiers(cmd.split())
     starts_with_wrapper = bool(leading) and leading[0] == ALLOWED_LAUNCHER
     if starts_with_wrapper:
         ok, _ = validate_wrapped(cmd)
         return not ok
+    if not CLI_RE.search(cmd):
+        return False
     cmd_unquoted = strip_quoted_regions(cmd)
     return bool(CLI_RE.search(cmd_unquoted))
 
-# (설명, 명령, expect_violation)
+# (설명, 명령, expect_violation). Codex 12차 [high] variable/function indirection
+# fixture 추가. `codex login (wrapped)`도 이제 violation (child=codex이지만 exec 없음).
 FIXTURES = [
     # === OK (violation 아님) ===
-    ("direct codex child",         "_run_with_timeout 600 30 codex exec - -s read-only", False),
-    ("direct gemini child",        "_run_with_timeout 600 30 gemini -m foo -p -",        False),
-    ("quoted CLI in echo",         'echo "codex exec prose example"',                    False),
-    ("quoted gemini in echo",      "echo 'gemini -p documentation'",                     False),
-    ("codex login (감사 대상 아님)", "_run_with_timeout 300 30 codex login",               False),
-    ("gemini version (감사 대상 아님)", "gemini --version",                                False),
+    ("direct codex child",          "_run_with_timeout 600 30 codex exec - -s read-only", False),
+    ("direct gemini child",         "_run_with_timeout 600 30 gemini -m foo -p -",        False),
+    ("quoted CLI in echo",          'echo "codex exec prose example"',                    False),
+    ("quoted gemini in echo",       "echo 'gemini -p documentation'",                     False),
+    ("codex help (unwrapped)",      "codex --help",                                       False),
+    ("gemini version (unwrapped)",  "gemini --version",                                   False),
     # === FAIL (violation 이어야 함) ===
-    ("bash -lc wrapper",           "_run_with_timeout 300 30 bash -lc 'codex exec -'",   True),
-    ("sh -c wrapper",              '_run_with_timeout 300 30 sh -c "gemini -p -"',       True),
-    ("zsh -c wrapper",             '_run_with_timeout 300 30 zsh -c "codex exec -"',     True),
-    ("env prefix wrapper",         "_run_with_timeout 300 30 env codex exec -",          True),
-    ("nohup wrapper",              "_run_with_timeout 300 30 nohup codex exec -",        True),
-    ("bare codex call",            "codex exec - -s read-only",                          True),
-    ("bare gemini call",           "gemini -p -",                                        True),
-    ("FOO=1 timeout bypass",       "FOO=1 timeout 300 codex exec -",                     True),
-    ("gtimeout prefix",            "gtimeout 300 codex exec -",                          True),
+    ("codex login (wrapped, CLI 없음)", "_run_with_timeout 300 30 codex login",            True),
+    ("bash -lc wrapper",            "_run_with_timeout 300 30 bash -lc 'codex exec -'",   True),
+    ("sh -c wrapper",               '_run_with_timeout 300 30 sh -c "gemini -p -"',       True),
+    ("zsh -c wrapper",              '_run_with_timeout 300 30 zsh -c "codex exec -"',     True),
+    ("env prefix wrapper",          "_run_with_timeout 300 30 env codex exec -",          True),
+    ("nohup wrapper",               "_run_with_timeout 300 30 nohup codex exec -",        True),
+    ("bash -c var indirection",     '_run_with_timeout 300 30 bash -c "$BACKEND_CMD"',    True),
+    ("function indirection",        "_run_with_timeout 300 30 run_backend",               True),
+    ("bare codex call",             "codex exec - -s read-only",                          True),
+    ("bare gemini call",            "gemini -p -",                                        True),
+    ("FOO=1 timeout bypass",        "FOO=1 timeout 300 codex exec -",                     True),
+    ("gtimeout prefix",             "gtimeout 300 codex exec -",                          True),
 ]
 
 import hashlib
 
 # Codex 10차 [high] fixture count pin — cardinality 변경 시 fail.
-EXPECTED_FIXTURE_COUNT = 15
+EXPECTED_FIXTURE_COUNT = 18
 if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(
         f"FATAL: FIXTURES count regression — expected {EXPECTED_FIXTURE_COUNT}, got {len(FIXTURES)}",
@@ -659,9 +665,8 @@ if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     sys.exit(1)
 
 # Codex 11차 [medium] fixture identity pin — 내용 변경 시 fail.
-# 15개 count는 유지하면서 중요 bypass case를 weak한 걸로 swap하는 regression 차단.
-# (desc|cmd|expect) 튜플을 newline-join하여 SHA256. 의도적 수정 시 상수 업데이트 필요.
-EXPECTED_FIXTURE_SIGNATURE = "992739714d740e3b92a36015ed1f8240e048a3ce675afa233eee0bc374f63315"
+# 튜플 (desc|cmd|expect) newline-join SHA256. 의도적 수정 시 상수 업데이트 필요.
+EXPECTED_FIXTURE_SIGNATURE = "cb5128e7f50c730e6f1a939108f0807828fa670d6ce86b1eabf04a3304d4d19b"
 _sig_input = "\n".join(f"{d}|{c}|{e}" for d, c, e in FIXTURES)
 _actual_sig = hashlib.sha256(_sig_input.encode()).hexdigest()
 if _actual_sig != EXPECTED_FIXTURE_SIGNATURE:
@@ -672,17 +677,19 @@ if _actual_sig != EXPECTED_FIXTURE_SIGNATURE:
     sys.exit(1)
 
 # 추가 의미론 가드: 중요 bypass case가 반드시 expect=True로 존재하는지.
-# signature 업데이트 시 실수로 critical case를 빼면 여기서도 걸린다 (이중 방어).
+# Codex 12차 [high] variable/function indirection fixture 포함 (총 12개 critical bypass).
 REQUIRED_BYPASS_DESCS = {
+    "codex login (wrapped, CLI 없음)",
     "bash -lc wrapper", "sh -c wrapper", "zsh -c wrapper",
     "env prefix wrapper", "nohup wrapper",
+    "bash -c var indirection", "function indirection",
     "bare codex call", "bare gemini call",
     "FOO=1 timeout bypass", "gtimeout prefix",
 }
 REQUIRED_OK_DESCS = {
     "direct codex child", "direct gemini child",
     "quoted CLI in echo", "quoted gemini in echo",
-    "codex login (감사 대상 아님)", "gemini version (감사 대상 아님)",
+    "codex help (unwrapped)", "gemini version (unwrapped)",
 }
 _fixture_map = {d: (c, e) for d, c, e in FIXTURES}
 _identity_errors = []

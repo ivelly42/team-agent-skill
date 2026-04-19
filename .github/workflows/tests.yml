@@ -18,10 +18,12 @@ jobs:
           bash --version
           python3 --version
 
-      - name: Install jsonschema (schema validation full mode)
+      - name: Install jsonschema (pinned version, hermetic)
         run: |
-          python3 -m pip install --user --quiet jsonschema
-          python3 -c "import jsonschema; print('jsonschema', jsonschema.__version__)"
+          # Pinned per Codex 12차 [medium] — 비헤메틱 "latest install" 금지.
+          # 의도적 업그레이드 시 이 핀도 PR에서 함께 수정.
+          python3 -m pip install --user --quiet 'jsonschema==4.24.0'
+          python3 -c "import importlib.metadata as m; print('jsonschema', m.version('jsonschema'))"
 
       - name: Run smoke tests
         run: bash tests/smoke.sh

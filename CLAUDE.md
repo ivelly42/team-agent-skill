@@ -21,4 +21,4 @@
 ```
 
 ## Current Status
-[2026-04-20] Codex 11차 findings 2건 수정: (1) `.github/workflows/tests.yml` 추가 — push/PR마다 smoke.sh + schema-validation.sh (strict mode, jsonschema 설치) 자동 실행. CI 연결 전까지 claim만 있고 enforcement 없던 구멍을 실제 merge gate로 격상. (2) Test 10 fixture identity pin: EXPECTED_FIXTURE_SIGNATURE (FIXTURES desc|cmd|expect 튜플의 SHA256, `992739714d740e...`) + REQUIRED_BYPASS_DESCS / REQUIRED_OK_DESCS set. count 고정 외에 내용 swap (bash -lc를 weak happy-path로 교체) regression도 즉시 차단. 이중 방어. smoke 10/10 + schema 6/6 = 16 PASS. Codex 12차 대기.
+[2026-04-20] Codex 12차 findings 2건 수정: (1) Test 8 Pass A를 CLI_RE pre-check 없이 unconditional — `_run_with_timeout`으로 시작하는 모든 command를 child 검증. `_run_with_timeout 300 30 bash -lc "$CMD"` / `_run_with_timeout 300 30 run_backend` 같은 variable/function indirection bypass 차단. (2) CI workflow jsonschema를 `==4.24.0`으로 pin + `importlib.metadata.version()` 사용 — 비헤메틱 latest-install 경로 제거. Test 10 fixture 15→18개(`bash -c var indirection`, `function indirection`, `codex login (wrapped, CLI 없음)` 추가), signature `cb5128e7f50c...`. REQUIRED_BYPASS 12개 / REQUIRED_OK 6개. smoke 10/10 + schema 6/6 = 16 PASS. Codex 13차 대기.
