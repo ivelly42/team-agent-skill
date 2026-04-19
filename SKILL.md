@@ -1137,6 +1137,36 @@ rm -f "$_PROMPT" "$_OUTPUT"
 
 **Codex 에이전트 read-only 강제**: codex exec에는 worktree 격리가 없으므로 항상 `-s read-only`로 실행한다. 사용자가 권한 A(bypassPermissions)를 선택해도 Codex 에이전트는 읽기 전용.
 
+**Gemini 백엔드 실행** (`agent_backends`에서 해당 에이전트가 `"gemini"`인 경우):
+
+Agent 도구 대신 Bash 도구로 `gemini -p`를 호출한다:
+
+1. **Write 도구**로 프롬프트를 `/tmp/ta-${_RUN_ID}-AGENT_NAME-prompt.txt`에 저장 (코드맵 주입 + 탐색 지시는 `${SKILL_DIR}/refs/gemini-agent-template.md`의 셸 명령 버전 사용).
+
+2. **Bash 도구**로 gemini 실행 (`run_in_background`로 병렬):
+```bash
+_SCHEMA="${SKILL_DIR}/refs/output-schema.json"
+_PROMPT="/tmp/ta-${_RUN_ID}-AGENT_NAME-prompt.txt"
+_OUTPUT=$(mktemp "/tmp/ta-${_RUN_ID}-AGENT_NAME-output.XXXXXX")
+
+if [ "$GEMINI_HAS_SCHEMA" -gt 0 ]; then
+  gemini -m gemini-3.1-flash-lite --json-schema "$_SCHEMA" \
+    -p - < "$_PROMPT" > "$_OUTPUT" 2>/dev/null
+else
+  gemini -m gemini-3.1-flash-lite -p - < "$_PROMPT" > "$_OUTPUT" 2>/dev/null
+fi
+cat "$_OUTPUT"
+rm -f "$_PROMPT" "$_OUTPUT"
+```
+
+**모델 선택**: 에이전트(×0.5~1.5) → `gemini-3.1-flash-lite`. Phase 4-A-2 검증자에서는 `gemini-3.1-pro-preview`.
+
+**Gemini 에이전트 프롬프트 차이**: 탐색 지시를 셸 명령 기반으로 변경. `${SKILL_DIR}/refs/gemini-agent-template.md`를 Read하여 `## 탐색 지시` 섹션 대체.
+
+**Gemini 에이전트 read-only 강제**: gemini CLI에는 샌드박스 옵션이 없으므로 프롬프트에 "절대 파일을 수정·생성·삭제하지 말라"를 강조 추가. `AGENT_MODE="bypassPermissions"`와 `GEMINI`/`CROSS_MODE`는 **Step 1-1.5에서 이미 차단**되므로 추가 방어.
+
+**Gemini 에이전트 병렬 실행**: Codex와 동일하게 별도 프로세스. Claude 배치(최대 3명) + Codex 병렬 + Gemini 병렬을 **전부 동시 실행** 가능. 총 동시성 높음.
+
 **에이전트 타임아웃**: 각 에이전트 프롬프트 맨 끝에 다음을 추가한다:
 ```
 ## 시간 제한
