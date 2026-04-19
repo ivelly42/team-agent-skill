@@ -932,6 +932,123 @@ PYEOF
 
 **LLM 구성 규칙**: `RUN_ID_VALUE`, `DATE_VALUE`, `HHMMSS_VALUE`, `AGENT_MODE_VALUE`, `MANIFEST_PATH` 등 Preamble/Phase 0에서 얻은 시스템 값과 `AUTO_MODE_BOOL`, `DEEP_MODE_BOOL`, `NOTIFY_BOOL`, `CODEX_MODE_OR_NONE` 등 LLM 내부 플래그는 Python 리터럴로 직접 치환한다. `MANIFEST_PATH`는 Phase 0에서 정의한 `$_MANIFEST` 값(예: `docs/team-agent/.runs/2026-04-06-001534.json`)으로 치환한다. `TASK_PURPOSE`, `PROJECT_CONTEXT`, `PROJECT_DIR`, `PROJECT_NAME`, `SCOPE_PATH`, `DIFF_BASE`, `DIFF_TARGET_FILES`처럼 사용자 유래 또는 외부 유래 값은 **Write 도구로 파일에 저장**하고 Python에서 `json.load()`로 읽는다. 이 패턴은 사용자 입력이 셸 명령에 절대 삽입되지 않으므로 인젝션을 원천 차단한다.
 
+### Phase 0.3: 공유 코드맵 생성
+
+Phase 0 완료 직후, 모든 에이전트가 공통으로 사용할 **코드맵(codemap.json)**을 1회 생성한다. 에이전트 간 중복 탐색을 제거하여 토큰 소비를 30-50% 절감하는 최적화이며, **실패해도 스킬은 정상 동작**한다(에이전트 독립 탐색으로 폴백).
+
+#### 백엔드 결정
+
+```bash
+if [ "$CROSS_MODE" = "true" ] || [ -n "$GEMINI_MODE" ]; then
+  _CODEMAP_BACKEND="gemini"
+elif [ -n "$CODEX_MODE" ]; then
+  _CODEMAP_BACKEND="codex"
+else
+  _CODEMAP_BACKEND="claude"
+fi
+
+_CODEMAP="$_MANIFEST_DIR/${_RUN_ID}-codemap.json"
+echo "CODEMAP_BACKEND: $_CODEMAP_BACKEND"
+echo "CODEMAP_PATH:    $_CODEMAP"
+```
+
+#### 프롬프트 조립
+
+Read 도구로 `${SKILL_DIR}/refs/codemap-generator.md`의 "공통 지시"와 해당 백엔드 탐색 지시 섹션을 추출하고, 플레이스홀더를 치환하여 `/tmp/ta-${_RUN_ID}-codemap-prompt.txt`에 저장한다 (Write 도구 사용):
+
+- `{PROJECT_DIR}` → `$_PROJECT_DIR`
+- `{SCOPE_PATH}` → `$SCOPE_PATH` (있으면 우선)
+
+#### 실행 (백엔드별)
+
+**Claude Agent** (기본 + `--codex` 미설정 + `--gemini` 미설정):
+
+Agent 도구로 `general-purpose` 에이전트 1명 생성:
+- `name`: `codemap-generator`
+- `subagent_type`: `general-purpose`
+- `mode`: `default`
+- `prompt`: 위에서 조립한 프롬프트 전문
+- `description`: "Generate shared codemap"
+
+타임아웃: 60초. 반환된 텍스트에서 JSON 추출 (첫 `{` ~ 마지막 `}`).
+
+**Codex exec** (`--codex` 지정 시):
+
+```bash
+_SCHEMA="${SKILL_DIR}/refs/codemap-schema.json"
+_EXEC_DIR="${SCOPE_PATH:-$_PROJECT_DIR}"
+
+timeout 60 codex exec - -s read-only -C "$_EXEC_DIR" \
+  --output-schema "$_SCHEMA" -o "$_CODEMAP" \
+  --skip-git-repo-check < "/tmp/ta-${_RUN_ID}-codemap-prompt.txt"
+_CODEMAP_RC=$?
+```
+
+**Gemini -p** (`--gemini` 또는 `--cross` 지정 시):
+
+```bash
+_SCHEMA="${SKILL_DIR}/refs/codemap-schema.json"
+
+if [ "$GEMINI_HAS_SCHEMA" -gt 0 ]; then
+  timeout 60 gemini -m gemini-3.1-flash-lite --json-schema "$_SCHEMA" \
+    -p - < "/tmp/ta-${_RUN_ID}-codemap-prompt.txt" > "$_CODEMAP" 2>/dev/null
+else
+  timeout 60 gemini -m gemini-3.1-flash-lite \
+    -p - < "/tmp/ta-${_RUN_ID}-codemap-prompt.txt" > "$_CODEMAP" 2>/dev/null
+fi
+_CODEMAP_RC=$?
+```
+
+#### 검증
+
+```bash
+if [ "$_CODEMAP_RC" -ne 0 ] || [ ! -s "$_CODEMAP" ]; then
+  echo "WARNING: 코드맵 생성 실패 (RC=$_CODEMAP_RC) — 에이전트 독립 탐색으로 진행"
+  _CODEMAP=""
+elif ! python3 -c "import json; json.load(open('$_CODEMAP'))" 2>/dev/null; then
+  echo "WARNING: 코드맵 JSON 파싱 실패 — 에이전트 독립 탐색으로 진행"
+  rm -f "$_CODEMAP"
+  _CODEMAP=""
+else
+  echo "INFO: 코드맵 생성 완료 — $_CODEMAP ($(wc -c < "$_CODEMAP") bytes)"
+fi
+```
+
+#### manifest 기록
+
+```bash
+python3 <<'PYEOF'
+import json
+m = json.load(open("MANIFEST_PATH"))
+m["codemap_backend"] = "CODEMAP_BACKEND_VALUE"
+m["codemap_path"] = "CODEMAP_PATH_OR_NULL"  # None이면 null
+json.dump(m, open("MANIFEST_PATH","w"), ensure_ascii=False, indent=2)
+PYEOF
+```
+
+치환 규칙:
+- `MANIFEST_PATH` → `$_MANIFEST`
+- `CODEMAP_BACKEND_VALUE` → `$_CODEMAP_BACKEND`
+- `CODEMAP_PATH_OR_NULL` → `$_CODEMAP` 값이 비어있으면 Python `None`으로, 있으면 문자열로
+
+#### .gitignore 권고
+
+```bash
+if [[ -f .gitignore ]] && ! grep -qxF 'docs/team-agent/.runs/*-codemap.json' .gitignore; then
+  echo "TIP: .gitignore에 docs/team-agent/.runs/*-codemap.json 추가 권장"
+fi
+```
+
+#### --resume 시 코드맵 재사용
+
+`RESUME_RUN_ID`가 설정된 경우:
+1. manifest.codemap_path 복원
+2. 파일 존재 확인
+3. 존재 → 재사용 (Phase 0.3 건너뜀, 비용 0)
+4. 없음 → Phase 0.3 재실행 (원래 `codemap_backend`로)
+
+---
+
 ### Phase 0.5: 비용 추정 및 승인
 
 **프로젝트 규모 판정** (소스 크기 기반):
