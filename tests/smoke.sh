@@ -220,12 +220,22 @@ test_backend_calls_timeout_guarded() {
                  "$SKILL_DIR/refs/cross-verification.md" "$SKILL_DIR/refs/gemini-verification.md")
 
     python3 - "${files[@]}" <<'PYEOF'
-import re, sys
+import re, shlex, sys
 files = sys.argv[1:]
 
 CLI_RE = re.compile(r'\b(codex\s+exec|gemini\s+(?:-m\s+\S+\s+)?(?:--json-schema\s+\S+\s+)?-p)\b')
 ALLOWED_LAUNCHER = '_run_with_timeout'
 ALLOWED_CHILDREN = {'codex', 'gemini'}
+
+def _tokenize_wrapped(cmd_text):
+    """Codex 23차 [high]: shell-aware argv 토큰화. shlex가 따옴표·backslash를
+    제대로 해체해서 `gemini "document -p behavior"` 같은 quoted prompt 내부의
+    `-p` 문자열이 별개 argv flag로 오인되는 것을 차단. 실패 시 whitespace
+    split로 폴백 — fallback 경로는 적어도 이전 세대와 동일한 엄격도를 유지."""
+    try:
+        return shlex.split(cmd_text, posix=True)
+    except ValueError:
+        return cmd_text.split()
 
 violations = []
 
@@ -434,7 +444,7 @@ def strip_leading_modifiers(tokens):
 def validate_wrapped(cmd_text):
     """`_run_with_timeout <secs> <grace> <child> ...` 형태 검증.
     Returns: (ok: bool, reason: str)"""
-    tokens = strip_leading_modifiers(cmd_text.split())
+    tokens = strip_leading_modifiers(_tokenize_wrapped(cmd_text))
     if not tokens:
         return False, "empty command"
     if tokens[0] != ALLOWED_LAUNCHER:
@@ -687,10 +697,20 @@ test_meta_mode_env_override
 test_lint_adversarial_fixtures() {
     local name="meta: Test 8 lint이 알려진 bypass fixture를 거부하는지"
     python3 - <<'PYEOF'
-import re, sys
+import re, shlex, sys
 
 CLI_RE = re.compile(r'\b(codex\s+exec|gemini\s+(?:-m\s+\S+\s+)?(?:--json-schema\s+\S+\s+)?-p)\b')
 ALLOWED_LAUNCHER = '_run_with_timeout'
+
+def _tokenize_wrapped(cmd_text):
+    """Codex 23차 [high]: shell-aware argv 토큰화. shlex가 따옴표·backslash를
+    제대로 해체해서 `gemini "document -p behavior"` 같은 quoted prompt 내부의
+    `-p` 문자열이 별개 argv flag로 오인되는 것을 차단. shlex.split이 실패하면
+    안전하게 whitespace split으로 폴백 (guard는 적어도 수준이 같거나 엄격)."""
+    try:
+        return shlex.split(cmd_text, posix=True)
+    except ValueError:
+        return cmd_text.split()
 
 def strip_leading_modifiers(tokens):
     # `(_run_with_timeout` 처럼 `(`가 다음 토큰에 붙은 형태도 처리 (Codex 14차 [medium]).
@@ -705,7 +725,7 @@ def strip_leading_modifiers(tokens):
     return out
 
 def validate_wrapped(cmd_text):
-    tokens = strip_leading_modifiers(cmd_text.split())
+    tokens = strip_leading_modifiers(_tokenize_wrapped(cmd_text))
     if not tokens: return False, 'empty'
     if tokens[0] != ALLOWED_LAUNCHER: return False, f'launcher={tokens[0]!r}'
     if len(tokens) < 4: return False, 'argv short'
@@ -922,11 +942,12 @@ FIXTURES = [
     ('semicolon chained codex',     '_run_with_timeout 300 30 codex exec - ; codex exec -',               True),
     ('and-and chained codex',       '_run_with_timeout 300 30 codex exec - && codex exec -',             True),
     ('gemini wrapped without -p',   '_run_with_timeout 300 30 gemini --version',                          True),
+    ('gemini quoted -p bypass',     '_run_with_timeout 300 30 gemini "document -p behavior"',             True),
 ]
 
 import hashlib
 
-EXPECTED_FIXTURE_COUNT = 39
+EXPECTED_FIXTURE_COUNT = 40
 if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(
         f"FATAL: FIXTURES count regression — expected {EXPECTED_FIXTURE_COUNT}, got {len(FIXTURES)}",
@@ -936,7 +957,7 @@ if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     sys.exit(1)
 
 # Codex 19차 추가: cmd-subst/backtick 내부 inert quoted literal 3개 OK fixture.
-EXPECTED_FIXTURE_SIGNATURE = "9c66a515d12aed5a570afc7b83ecfd24d30740900a14f5c3f0bc75f6cb95d6fa"
+EXPECTED_FIXTURE_SIGNATURE = "94dae4f771a08b4dc716a277cd323e18fdceb5a65647ea435b45af0e2ff84bbd"
 _sig_input = "\n".join(f"{d}|{c}|{e}" for d, c, e in FIXTURES)
 _actual_sig = hashlib.sha256(_sig_input.encode()).hexdigest()
 if _actual_sig != EXPECTED_FIXTURE_SIGNATURE:
@@ -962,6 +983,7 @@ REQUIRED_BYPASS_DESCS = {
     "backtick dquote leak pipe",
     "semicolon chained codex", "and-and chained codex",
     "gemini wrapped without -p",
+    "gemini quoted -p bypass",
 }
 REQUIRED_OK_DESCS = {
     "direct codex child", "direct gemini child",

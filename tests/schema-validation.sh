@@ -325,6 +325,23 @@ try:
 except jsonschema.ValidationError:
     pass
 
+# Codex 23차: status=ok 인데 error 필드가 함께 오면 stale failure 누수 — 거부 기대.
+# (refs/ultra-consolidation-schema.json allOf[1] if status==ok then not required[error])
+ok_with_stale_error = {
+    "role": "x",
+    "status": "ok",
+    "error": "stale failure text from previous attempt",
+    "consensus_findings": [],
+    "consensus_ideas": [],
+    "contradictions": []
+}
+try:
+    jsonschema.validate(ok_with_stale_error, schema)
+    print("status=ok + error was accepted (stale failure leak)", file=sys.stderr)
+    sys.exit(6)
+except jsonschema.ValidationError:
+    pass
+
 sys.exit(0)
 PYEOF
     local rc=$?
