@@ -1388,19 +1388,59 @@ Agent 도구 대신 Bash 도구로 `codex exec`를 호출한다. 표준 패턴:
 
 1. **Write 도구**로 프롬프트 전문을 `/tmp/ta-${_RUN_ID}-AGENT_NAME-prompt.txt`에 저장한다. 프롬프트에는 역할, 체크리스트, 출력 형식 등 고정 부분과 프로젝트 경로, 작업 목적 등 동적 값을 모두 포함한다. Write 도구는 셸을 거치지 않으므로 사용자 유래 값이 안전하게 기록된다.
 
-2. **Bash 도구**로 codex exec를 실행한다:
+2. **Bash 도구**로 codex exec를 실행한다 — **hard timeout 필수**:
 ```bash
+# Hard timeout wrapper — refs/timeout-wrapper.sh와 동일 구현을 인라인.
+# 이유: skill 실행 환경에서 source 가능 여부 불명확 → 매 bash 블록에 self-contained.
+# 3-tier: GNU timeout → gtimeout → Python watchdog (모두 fail-closed, 무한 대기 없음).
+_TIMEOUT_BIN=""
+command -v timeout >/dev/null 2>&1 && _TIMEOUT_BIN="timeout"
+[ -z "$_TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && _TIMEOUT_BIN="gtimeout"
+_run_with_timeout() {
+  local _secs="$1"; shift; local _grace="$1"; shift
+  if [ -n "$_TIMEOUT_BIN" ]; then
+    "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"; return $?
+  fi
+  # Python watchdog — `python3 -c` (NOT heredoc): heredoc은 fd 0 점유 → child가
+  # prompt 대신 EOF 수신. stdin=sys.stdin으로 명시 상속.
+  python3 -c '
+import os, signal, subprocess, sys
+secs=int(sys.argv[1]); grace=int(sys.argv[2]); cmd=sys.argv[3:]
+try: p=subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
+except FileNotFoundError: sys.exit(127)
+try: sys.exit(p.wait(timeout=secs))
+except subprocess.TimeoutExpired:
+    try: os.killpg(p.pid, signal.SIGTERM)
+    except ProcessLookupError: pass
+    try: p.wait(timeout=grace); sys.exit(124)
+    except subprocess.TimeoutExpired:
+        try: os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError: pass
+        p.wait(); sys.exit(137)
+' "$_secs" "$_grace" "$@"
+  return $?
+}
+
 _SCHEMA="${_SKILL_DIR}/refs/output-schema.json"
 _PROMPT="/tmp/ta-${_RUN_ID}-AGENT_NAME-prompt.txt"
 _OUTPUT=$(mktemp "/tmp/ta-${_RUN_ID}-AGENT_NAME-output.XXXXXX")
-# 실행 (read-only, 프로젝트 디렉토리 지정)
-# SCOPE_PATH가 있으면 scope 경로, 없으면 프로젝트 루트
 _EXEC_DIR="${SCOPE_PATH:-$_PROJECT_DIR}"
-codex exec - -s read-only -C "$_EXEC_DIR" \
-  --output-schema "$_SCHEMA" -o "$_OUTPUT" \
-  --skip-git-repo-check < "$_PROMPT"
-# 결과 읽기
-cat "$_OUTPUT"
+
+# 600초(10분) 실행 한도 + 30초 SIGTERM grace (Phase 1 agent soft limit과 일치).
+# rc=124(timeout) / rc=137(SIGKILL) / non-zero → 에이전트 실패로 처리 → 기존 retry·circuit breaker 동작.
+_run_with_timeout 600 30 \
+  codex exec - -s read-only -C "$_EXEC_DIR" \
+    --output-schema "$_SCHEMA" -o "$_OUTPUT" \
+    --skip-git-repo-check < "$_PROMPT"
+_CODEX_RC=$?
+
+case "$_CODEX_RC" in
+  0)   cat "$_OUTPUT" ;;
+  124) echo "[team-agent] codex agent timed out (600s) — marking as failed" >&2 ;;
+  137) echo "[team-agent] codex agent SIGKILL after grace — marking as failed" >&2 ;;
+  127) echo "[team-agent] codex CLI not found — marking as failed" >&2 ;;
+  *)   echo "[team-agent] codex agent non-zero rc=$_CODEX_RC — marking as failed" >&2 ;;
+esac
 rm -f "$_PROMPT" "$_OUTPUT"
 ```
 
@@ -1419,23 +1459,61 @@ Agent 도구 대신 Bash 도구로 `gemini -p`를 호출한다:
 
 1. **Write 도구**로 프롬프트를 `/tmp/ta-${_RUN_ID}-AGENT_NAME-prompt.txt`에 저장 (코드맵 주입 + 탐색 지시는 `${_SKILL_DIR}/refs/gemini-agent-template.md`의 셸 명령 버전 사용).
 
-2. **Bash 도구**로 gemini 실행 (`run_in_background`로 병렬):
+2. **Bash 도구**로 gemini 실행 (`run_in_background`로 병렬) — **hard timeout 필수**:
 ```bash
+# Codex 블록과 동일한 포터블 timeout 래퍼. refs/timeout-wrapper.sh 참조.
+_TIMEOUT_BIN=""
+command -v timeout >/dev/null 2>&1 && _TIMEOUT_BIN="timeout"
+[ -z "$_TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && _TIMEOUT_BIN="gtimeout"
+_run_with_timeout() {
+  local _secs="$1"; shift; local _grace="$1"; shift
+  if [ -n "$_TIMEOUT_BIN" ]; then
+    "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"; return $?
+  fi
+  python3 -c '
+import os, signal, subprocess, sys
+secs=int(sys.argv[1]); grace=int(sys.argv[2]); cmd=sys.argv[3:]
+try: p=subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
+except FileNotFoundError: sys.exit(127)
+try: sys.exit(p.wait(timeout=secs))
+except subprocess.TimeoutExpired:
+    try: os.killpg(p.pid, signal.SIGTERM)
+    except ProcessLookupError: pass
+    try: p.wait(timeout=grace); sys.exit(124)
+    except subprocess.TimeoutExpired:
+        try: os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError: pass
+        p.wait(); sys.exit(137)
+' "$_secs" "$_grace" "$@"
+  return $?
+}
+
 _SCHEMA="${_SKILL_DIR}/refs/output-schema.json"
 _PROMPT="/tmp/ta-${_RUN_ID}-AGENT_NAME-prompt.txt"
 _OUTPUT=$(mktemp "/tmp/ta-${_RUN_ID}-AGENT_NAME-output.XXXXXX")
-
 _STDERR="/tmp/ta-${_RUN_ID}-AGENT_NAME-stderr.log"
 : > "$_STDERR" && chmod 600 "$_STDERR"
+
+# 600초 + 30초 grace. 네트워크 wedge / 인증 stall 방어.
 if [ "$GEMINI_HAS_SCHEMA" -gt 0 ]; then
-  gemini -m gemini-3.1-flash-lite-preview --json-schema "$_SCHEMA" \
-    -p - < "$_PROMPT" > "$_OUTPUT" 2>"$_STDERR"
+  _run_with_timeout 600 30 \
+    gemini -m gemini-3.1-flash-lite-preview --json-schema "$_SCHEMA" \
+      -p - < "$_PROMPT" > "$_OUTPUT" 2>"$_STDERR"
 else
-  gemini -m gemini-3.1-flash-lite-preview -p - < "$_PROMPT" > "$_OUTPUT" 2>"$_STDERR"
+  _run_with_timeout 600 30 \
+    gemini -m gemini-3.1-flash-lite-preview -p - < "$_PROMPT" > "$_OUTPUT" 2>"$_STDERR"
 fi
-# 실패 시 stderr tail 출력
+_GEMINI_RC=$?
+
+# rc 기반 에이전트 실패 처리 (기존 retry/circuit-breaker 발동).
+case "$_GEMINI_RC" in
+  0)   cat "$_OUTPUT" ;;
+  124) echo "[team-agent] gemini agent timed out (600s) — marking as failed" >&2 ;;
+  137) echo "[team-agent] gemini agent SIGKILL after grace — marking as failed" >&2 ;;
+  127) echo "[team-agent] gemini CLI not found — marking as failed" >&2 ;;
+  *)   echo "[team-agent] gemini agent non-zero rc=$_GEMINI_RC — marking as failed" >&2 ;;
+esac
 [ -s "$_OUTPUT" ] || [ ! -s "$_STDERR" ] || { echo "WARN gemini agent stderr:"; tail -5 "$_STDERR"; }
-cat "$_OUTPUT"
 rm -f "$_PROMPT" "$_OUTPUT"
 ```
 
