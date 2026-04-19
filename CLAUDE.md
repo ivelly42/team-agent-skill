@@ -21,4 +21,4 @@
 ```
 
 ## Current Status
-[2026-04-20] Codex 17차 findings 1건 수정: backtick 내부 quote state가 외부로 leak하여 top-level operator split 실패. `` `printf '"'`  | tee out`` 이 하나의 piece로 병합되어 wrapper pipe 감지 실패. 해결: backtick도 `$()`와 동일하게 quote_stack push/pop — backtick 진입 시 현재 quote state를 push하고 내부 reset, 종료 시 pop. Test 10 fixture 31→34 (backtick leak pipe + `;` chained + `&&` chained unwrapped codex), signature `59d07606d53d...`. REQUIRED_BYPASS 24 / REQUIRED_OK 10. smoke 10/10 + schema 6/6 = 16 PASS. Codex 18차 대기.
+[2026-04-20] Codex 18차 findings 1건 수정: `$()` 안 backtick 안의 `)` 가 잘못 subst_depth를 pop 시켜 false positive 발생. 해결: `)` pop 조건에 `not btick` 추가 + `$(` push 조건에도 `not btick` 추가 — backtick 내부의 `)` 는 subst frame을 건드리지 않음 (delimiter-typed stack semantics). Test 10 fixture 34→35 (`subst with backtick paren` OK — `$(printf \`echo )\` | wc -l)`), signature `7cd9088a4b5e...`. REQUIRED_OK 11. smoke 10/10 + schema 6/6 = 16 PASS. Codex 19차 대기.

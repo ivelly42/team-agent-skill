@@ -343,16 +343,17 @@ def split_commands(block_lines):
                 in_single = not in_single; buf += ch; j += 1; continue
             if ch == '"' and not in_single:
                 in_double = not in_double; buf += ch; j += 1; continue
-            if ch == '$' and j+1 < n and text[j+1] == '(' and not in_single:
+            if ch == '$' and j+1 < n and text[j+1] == '(' and not in_single and not btick:
                 quote_stack.append((in_single, in_double))
                 in_single = False; in_double = False
                 subst_depth += 1; buf += ch + text[j+1]; j += 2; continue
-            if ch == ')' and subst_depth > 0 and not in_single and not in_double:
+            # Codex 18차 [medium]: `)` 는 backtick 안에선 subst frame을 pop 하면 안 됨.
+            if ch == ')' and subst_depth > 0 and not in_single and not in_double and not btick:
                 subst_depth -= 1
                 if quote_stack:
                     in_single, in_double = quote_stack.pop()
                 buf += ch; j += 1; continue
-            # Codex 17차: backtick 안 quote state도 local. push/pop.
+            # backtick 안 quote state도 local. push/pop.
             if ch == '`' and not in_single:
                 if not btick:
                     quote_stack.append((in_single, in_double))
@@ -745,11 +746,11 @@ def split_single_cmd(text):
             in_single = not in_single; buf += ch; j += 1; continue
         if ch == '"' and not in_single:
             in_double = not in_double; buf += ch; j += 1; continue
-        if ch == '$' and j+1 < n and text[j+1] == '(' and not in_single:
+        if ch == '$' and j+1 < n and text[j+1] == '(' and not in_single and not btick:
             quote_stack.append((in_single, in_double))
             in_single = False; in_double = False
             subst_depth += 1; buf += ch + text[j+1]; j += 2; continue
-        if ch == ')' and subst_depth > 0 and not in_single and not in_double:
+        if ch == ')' and subst_depth > 0 and not in_single and not in_double and not btick:
             subst_depth -= 1
             if quote_stack:
                 in_single, in_double = quote_stack.pop()
@@ -824,6 +825,7 @@ FIXTURES = [
     ("cmd-subst pipeline inside",   "_run_with_timeout 300 30 codex exec --note $(cat a | wc -l)", False),
     ("attached paren subshell bg",  "(_run_with_timeout 300 30 codex exec -) &",           False),
     ("cmd-subst quoted paren",      '_run_with_timeout 300 30 codex exec --note $(printf ")" | wc -c)', False),
+    ("subst with backtick paren",   "_run_with_timeout 300 30 codex exec --note $(printf `echo )` | wc -l)", False),
     # === FAIL (violation 이어야 함) ===
     ("codex login (wrapped, CLI 없음)", "_run_with_timeout 300 30 codex login",            True),
     ("bash -lc wrapper",            "_run_with_timeout 300 30 bash -lc 'codex exec -'",   True),
@@ -853,7 +855,7 @@ FIXTURES = [
 
 import hashlib
 
-EXPECTED_FIXTURE_COUNT = 34
+EXPECTED_FIXTURE_COUNT = 35
 if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(
         f"FATAL: FIXTURES count regression — expected {EXPECTED_FIXTURE_COUNT}, got {len(FIXTURES)}",
@@ -862,8 +864,8 @@ if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(f"  If intentional expansion/pruning, update EXPECTED_FIXTURE_COUNT + signature + required sets.", file=sys.stderr)
     sys.exit(1)
 
-# Codex 17차 추가: backtick dquote leak + ; / && chained unwrapped codex exec.
-EXPECTED_FIXTURE_SIGNATURE = "59d07606d53d7dde1d5910f426efb47e3f42697a75a72ed841dd6b5ceb9a245f"
+# Codex 18차 추가: $() 안 backtick 안의 `)` 오탐 regression (subst with backtick paren).
+EXPECTED_FIXTURE_SIGNATURE = "7cd9088a4b5e8196d2633377c97cb77f188fd69cc712128a4d062f5958998291"
 _sig_input = "\n".join(f"{d}|{c}|{e}" for d, c, e in FIXTURES)
 _actual_sig = hashlib.sha256(_sig_input.encode()).hexdigest()
 if _actual_sig != EXPECTED_FIXTURE_SIGNATURE:
@@ -895,7 +897,7 @@ REQUIRED_OK_DESCS = {
     "codex help (unwrapped)", "gemini version (unwrapped)",
     "redirect (not pipeline)",
     "cmd-subst pipeline inside", "attached paren subshell bg",
-    "cmd-subst quoted paren",
+    "cmd-subst quoted paren", "subst with backtick paren",
 }
 _fixture_map = {d: (c, e) for d, c, e in FIXTURES}
 _identity_errors = []
