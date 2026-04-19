@@ -397,3 +397,55 @@
 - [ ] 재학습 워크플로우 — 데이터 갱신 → 재학습 자동화
 
 **탐색 힌트**: `transformers/`, `peft`, `trainer.py`, `*finetune*`, `datasets/` with jsonl
+
+## GraphQL
+
+- [ ] 스키마 설계 — nullable 정책, interface/union 활용, 버전 관리
+- [ ] 리졸버 N+1 — DataLoader 사용, 배치 해결
+- [ ] 권한 모델 — 필드 단위 인가, 디렉티브 vs 미들웨어
+- [ ] 쿼리 복잡도 — depth/complexity limit, timeout
+- [ ] 캐싱 — persisted query, response 캐시, field 캐시
+- [ ] 에러 처리 — partial errors, extensions 표준
+- [ ] 스키마 진화 — deprecation 절차, breaking change 탐지
+- [ ] 클라이언트 코드젠 — 타입 동기화, 트리 셰이킹
+
+**탐색 힌트**: `*.graphql`, `schema.graphql`, apollo/relay/graphql-js import
+
+## gRPC
+
+- [ ] proto 스키마 — reserved 필드, wire format 호환성
+- [ ] 스트리밍 — 언제 unary/server/client/bidi 쓰는지
+- [ ] 데드라인·취소 — 모든 RPC에 데드라인 강제
+- [ ] 재시도·idempotency — safe retry, jitter
+- [ ] 인증 — mTLS, metadata 기반 인증
+- [ ] 버전 관리 — 패키지명 버저닝, 하위 호환 규칙
+- [ ] 로드 밸런싱 — 클라이언트 LB vs proxy, picker 전략
+- [ ] 관찰성 — tracing context 전파, error code 매핑
+
+**탐색 힌트**: `*.proto`, `grpc_gen/`, grpc-go/grpc-js import
+
+## OpenAPI/REST 계약
+
+- [ ] 계약 위치 — spec vs 코드 생성 방향(code-first vs spec-first)
+- [ ] 버전 전략 — URL path vs header, 동시 지원 기간
+- [ ] 에러 스키마 — RFC 7807 Problem Details 준수
+- [ ] 페이지네이션·필터·정렬 — 표준화 여부
+- [ ] idempotency — POST/PUT/DELETE 키 전략
+- [ ] 인증 스킴 — OAuth2/JWT/API key 혼용 문제
+- [ ] 계약 테스트 — pact/dredd, CI 통합
+- [ ] 드리프트 탐지 — 런타임 스펙과 실제 응답 일치
+
+**탐색 힌트**: `openapi.{yaml,json}`, `swagger.*`, FastAPI/NestJS/Express OpenAPI 어댑터
+
+## 이벤트 드리븐
+
+- [ ] 이벤트 스키마 — 버전 관리, 스키마 레지스트리(Confluent·Apicurio)
+- [ ] idempotency — consumer 중복 처리 방어, dedup key
+- [ ] 순서 보장 — 파티션 키 전략, 순서 필요성 재검토
+- [ ] at-least-once vs exactly-once — 트레이드오프 명시
+- [ ] 재처리·리플레이 — DLQ, 오프셋 리셋 절차
+- [ ] 스키마 진화 — 하위 호환, forward/backward compatibility
+- [ ] 백프레셔·처리량 — consumer lag 모니터링, scaling 정책
+- [ ] 분산 트랜잭션 — Saga/outbox 패턴 적용 여부
+
+**탐색 힌트**: `*.avsc`, kafka/rabbitmq/nats/sqs config, `events/`, `handlers/`
