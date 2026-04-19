@@ -365,6 +365,33 @@ mapfile -t DIFF_TARGET_FILES < <(printf '%s\n' "${_EXPANDED_DIFF_FILES[@]}" | aw
 ```
 6. 이후 Step 2와 Phase 0 manifest에는 이 `DIFF_TARGET_FILES`를 우선 분석 대상/기록 값으로 사용한다.
 
+### --gemini / --cross 가용성 탐지
+
+`GEMINI_MODE`가 설정됐거나 `CROSS_MODE=true`인 경우 Gemini CLI 가용성을 검사한다:
+
+```bash
+GEMINI_HAS_SCHEMA=0
+if [ -n "$GEMINI_MODE" ] || [ "$CROSS_MODE" = "true" ]; then
+  if ! command -v gemini >/dev/null 2>&1; then
+    echo "WARNING: gemini CLI 미설치 — --gemini/--cross 폴백"
+    if [ -n "$GEMINI_MODE" ]; then
+      GEMINI_MODE=""  # Claude 폴백
+    fi
+    if [ "$CROSS_MODE" = "true" ]; then
+      CROSS_MODE="false"
+      CODEX_MODE="${CODEX_MODE:-hybrid}"  # Codex 전용 2중 검증으로 다운그레이드
+      echo "INFO: --cross → --codex hybrid로 다운그레이드 (gemini 미설치)"
+    fi
+  else
+    # --json-schema 지원 여부 탐지
+    GEMINI_HAS_SCHEMA=$(gemini --help 2>&1 | grep -c -- "--json-schema" 2>/dev/null || echo 0)
+    [ "$GEMINI_HAS_SCHEMA" = "0" ] && echo "INFO: gemini --json-schema 미지원 — 프롬프트 JSON 지시로 대체"
+  fi
+fi
+```
+
+이후 Phase 0.3/Phase 1/Phase 4-A-2에서 이 변수를 참조한다.
+
 ---
 
 ## Step 2: 프로젝트 자동 분석
