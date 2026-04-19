@@ -610,6 +610,17 @@ Claude는 이 풀에서 TASK_PURPOSE와 PROJECT_CONTEXT에 적합한 역할을 *
 키워드 매칭 규칙 없음. Claude가 다음 5단계로 팀을 구성한다:
 
 1. **필수 역할 식별**: TASK_PURPOSE의 핵심 목적에 직접 대응하는 역할 선택
+1.5. **AI/API 스택 자동 탐지**: Step 2 스캔에서 다음 패턴 발견 시 해당 역할을 자동 포함:
+  - `langchain`/`llamaindex`/`chromadb` → RAG 아키텍트
+  - `pinecone`/`weaviate`/`qdrant`/`pgvector` → 벡터DB 전문가
+  - `prompts/` 디렉토리 또는 `*.prompt.*` + openai/anthropic SDK → 프롬프트 엔지니어
+  - `eval*/` 또는 `benchmark*/`에서 LLM 호출 → 모델 평가 전문가
+  - `transformers`/`peft`/`*finetune*` → 파인튜닝 전문가
+  - `*.graphql` 또는 apollo/relay → GraphQL 아키텍트
+  - `*.proto` → gRPC 엔지니어
+  - `openapi.{yaml,json}`/`swagger.*` → OpenAPI 설계자
+  - `kafka`/`rabbitmq`/`nats`/`sqs` config → 이벤트 드리븐 아키텍트
+  (기존 일반 역할과 공존 가능 — 관심 영역이 다르므로 둘 다 포함)
 2. **컨텍스트 보강**: PROJECT_CONTEXT의 스택/테스트/설정에 맞는 보강 역할 추가
 3. **즉석 역할 생성 (Ad-hoc Role)**: 풀의 33개 역할로 TASK_PURPOSE를 충분히 커버할 수 없다고 판단되면, **최대 2개**까지 커스텀 역할을 즉석 생성한다
 4. **중복 제거**: 동일 카테고리에서 하나만 유지. 3~8명 범위 확인. **예외: 언어 전문가는 감지된 스택별 1명 허용** (예: Python+TypeScript 프로젝트면 둘 다 포함)
@@ -639,14 +650,14 @@ Claude는 이 풀에서 TASK_PURPOSE와 PROJECT_CONTEXT에 적합한 역할을 *
 
 **--codex 백엔드 라우팅** (`CODEX_MODE` 설정 시):
 
-| 가중치 | 역할 예시 | hybrid 모드 | all 모드 |
-|--------|----------|------------|---------|
-| ×1.5 (정밀) | 보안 감사, 디버거, 성능 엔지니어 | **Claude** Agent | codex exec |
-| ×1.0 (구조) | 아키텍트, 코드 리뷰어 | Claude Agent | codex exec |
-| ×0.7 (문서) | 문서 아키텍트, UI/UX | **codex** exec | codex exec |
-| ×0.5 (탐색) | 코드 탐색가, 통합 QA | **codex** exec | codex exec |
+| 가중치 | 역할 예시 | 기본 | `--codex hybrid` | `--codex all` | `--gemini hybrid` | `--gemini all` | `--cross` |
+|--------|----------|:----:|:----:|:----:|:----:|:----:|:----:|
+| ×1.5 (정밀) | 보안 감사, 디버거, 성능 엔지니어 | Claude | **Claude** | Codex | **Claude** | Gemini | **Claude** |
+| ×1.0 (구조) | 아키텍트, 코드 리뷰어 | Claude | Claude | Codex | Claude | Gemini | **Codex** |
+| ×0.7 (문서) | 문서 아키텍트, UI/UX | Claude | **Codex** | Codex | **Gemini** | Gemini | **Gemini** |
+| ×0.5 (탐색) | 코드 탐색가, 통합 QA | Claude | **Codex** | Codex | **Gemini** | Gemini | **Gemini** |
 
-hybrid 모드에서 각 에이전트의 백엔드를 `claude` 또는 `codex`로 결정한다. 결정 결과는 manifest의 `agent_backends` 딕셔너리(`{에이전트이름: "claude"|"codex"}`)에 저장한다. Step 3-5 제안 테이블에 `backend` 컬럼을 추가하여 사용자에게 표시.
+각 에이전트의 백엔드를 `claude`/`codex`/`gemini` 중 하나로 결정한다. 결정 결과는 manifest의 `agent_backends` 딕셔너리(`{에이전트이름: "claude"|"codex"|"gemini"}`)에 저장한다. Step 3-5 제안 테이블에 `backend` 컬럼을 추가하여 사용자에게 표시.
 
 ### 3-4. 에이전트 프롬프트 템플릿
 
