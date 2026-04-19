@@ -21,4 +21,4 @@
 ```
 
 ## Current Status
-[2026-04-20] Codex 13차 findings 2건 수정: (1) `strip_quoted_regions`가 double-quote 내 `$(...)` + backtick 보존 — `OUT="$(codex exec -)"`, `echo "$(gemini -p -)"`, ```OUT=`codex exec -``` 모두 detectable. (2) split_commands에 trailing_op 추가 + Pass A에서 `|`/`&`가 wrapper 뒤에 붙으면 violation (단 `(...) &` subshell background는 예외, `2>&1` 같은 redirect fd reference도 예외). Test 10 fixture 18→24 (cmd-substitution 3 + pipeline/background 2 + redirect-OK 1), signature `cef746014e05...`. REQUIRED_BYPASS 17개 / REQUIRED_OK 7개. smoke 10/10 + schema 6/6 = 16 PASS. Codex 14차 대기.
+[2026-04-20] Codex 14차 findings 2건 수정: (1) split_commands / split_single_cmd에 `$(...)` + backtick nesting 깊이 추적 — 내부 `|`/`&`는 top-level operator 아님. `_run_with_timeout ... $(cat a | wc -l)` 더 이상 false positive 아님. (2) `strip_leading_modifiers` / `starts_in_subshell`이 `(foo` 붙은 paren도 인식 — `(_run_with_timeout ...) &` 공백 유무와 무관하게 subshell 면제 적용. Test 10 fixture 24→26 (cmd-subst pipeline inside, attached paren subshell), signature `6771d62ca941...`. REQUIRED_BYPASS 17 / REQUIRED_OK 9. smoke 10/10 + schema 6/6 = 16 PASS. Codex 15차 대기.

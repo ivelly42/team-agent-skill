@@ -328,17 +328,27 @@ def split_commands(block_lines):
         buf = ''
         j = 0
         in_single = in_double = False
-        pieces = []  # list of (text, trailing_op)
+        subst_depth = 0  # $(...) 중첩 깊이
+        btick = False    # backtick 내부
+        pieces = []
         n = len(text)
         while j < n:
             ch = text[j]
             if ch == '\\' and j + 1 < n:
                 buf += ch + text[j+1]; j += 2; continue
-            if ch == "'" and not in_double:
+            if ch == "'" and not in_double and not btick:
                 in_single = not in_single; buf += ch; j += 1; continue
             if ch == '"' and not in_single:
                 in_double = not in_double; buf += ch; j += 1; continue
-            if not in_single and not in_double:
+            # $() / `...` 추적 — 내부의 |/& 는 top-level operator 아님 (Codex 14차 [high])
+            if ch == '$' and j+1 < n and text[j+1] == '(' and not in_single:
+                subst_depth += 1; buf += ch + text[j+1]; j += 2; continue
+            if ch == ')' and subst_depth > 0 and not in_single:
+                subst_depth -= 1; buf += ch; j += 1; continue
+            if ch == '`' and not in_single:
+                btick = not btick; buf += ch; j += 1; continue
+            # top-level operator는 quote/subst/backtick 밖에서만
+            if not in_single and not in_double and subst_depth == 0 and not btick:
                 if ch == ';':
                     pieces.append((buf, ';')); buf = ''; j += 1; continue
                 if ch == '&' and j+1 < n and text[j+1] == '&':
@@ -348,9 +358,8 @@ def split_commands(block_lines):
                 if ch == '|':
                     pieces.append((buf, '|')); buf = ''; j += 1; continue
                 if ch == '&':
-                    # &N / &{ / &- 는 redirect fd reference — background 아님
                     if j+1 < n and (text[j+1].isdigit() or text[j+1] in ('{', '-')):
-                        buf += ch; j += 1; continue
+                        buf += ch; j += 1; continue  # redirect fd ref
                     pieces.append((buf, '&')); buf = ''; j += 1; continue
             buf += ch; j += 1
         if buf.strip():
@@ -361,11 +370,17 @@ def split_commands(block_lines):
     return commands
 
 def strip_leading_modifiers(tokens):
-    while tokens and tokens[0] in ('!', 'time', '(', '((', '{', 'exec', 'eval'):
-        tokens = tokens[1:]
-    while tokens and re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', tokens[0]):
-        tokens = tokens[1:]
-    return tokens
+    # `(_run_with_timeout` 같이 `(`가 다음 토큰에 붙은 경우도 처리 (Codex 14차 [medium]).
+    out = list(tokens)
+    # 첫 토큰이 `(`로 시작하지만 순수 `(`이 아니면 분리
+    if out and out[0].startswith('(') and out[0] != '(':
+        rest = out[0][1:]
+        out = ['('] + ([rest] if rest else []) + out[1:]
+    while out and out[0] in ('!', 'time', '(', '((', '{', 'exec', 'eval'):
+        out = out[1:]
+    while out and re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', out[0]):
+        out = out[1:]
+    return out
 
 def validate_wrapped(cmd_text):
     """`_run_with_timeout <secs> <grace> <child> ...` 형태 검증.
@@ -400,9 +415,9 @@ for path in files:
     for block_start, block_lines in extract_bash_blocks(lines):
         for cmd_lineno, cmd, trailing_op in split_commands(block_lines):
             raw_tokens = cmd.split()
-            # wrapper가 subshell `(...)` 안에 들어간 경우 trailing_op(`&`)는 subshell
-            # 전체에 속하므로 wrapper 자체의 pipeline/background로 볼 수 없다.
-            starts_in_subshell = bool(raw_tokens) and raw_tokens[0] == '('
+            # Codex 14차 [medium]: `(_run_with_timeout ...) &` (공백 없는 `(`) 도
+            # subshell로 인식. startswith('(') 로 확장.
+            starts_in_subshell = bool(raw_tokens) and raw_tokens[0].startswith('(')
             leading = strip_leading_modifiers(raw_tokens)
             starts_with_wrapper = bool(leading) and leading[0] == ALLOWED_LAUNCHER
 
@@ -619,11 +634,16 @@ CLI_RE = re.compile(r'\b(codex\s+exec|gemini\s+(?:-m\s+\S+\s+)?(?:--json-schema\
 ALLOWED_LAUNCHER = '_run_with_timeout'
 
 def strip_leading_modifiers(tokens):
-    while tokens and tokens[0] in ('!', 'time', '(', '((', '{', 'exec', 'eval'):
-        tokens = tokens[1:]
-    while tokens and re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', tokens[0]):
-        tokens = tokens[1:]
-    return tokens
+    # `(_run_with_timeout` 처럼 `(`가 다음 토큰에 붙은 형태도 처리 (Codex 14차 [medium]).
+    out = list(tokens)
+    if out and out[0].startswith('(') and out[0] != '(':
+        rest = out[0][1:]
+        out = ['('] + ([rest] if rest else []) + out[1:]
+    while out and out[0] in ('!', 'time', '(', '((', '{', 'exec', 'eval'):
+        out = out[1:]
+    while out and re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', out[0]):
+        out = out[1:]
+    return out
 
 def validate_wrapped(cmd_text):
     tokens = strip_leading_modifiers(cmd_text.split())
@@ -686,20 +706,28 @@ def strip_quoted_regions(text):
     return ''.join(out)
 
 def split_single_cmd(text):
-    """text를 pipeline/background/sequencer operator로 분할. Returns [(piece, trailing_op), ...]."""
+    """Codex 14차 [high]: $()/backtick 깊이 추적 — 내부 |/& 는 top-level 아님."""
     buf = ''
     j = 0; n = len(text)
     in_single = in_double = False
+    subst_depth = 0
+    btick = False
     pieces = []
     while j < n:
         ch = text[j]
         if ch == '\\' and j + 1 < n:
             buf += ch + text[j+1]; j += 2; continue
-        if ch == "'" and not in_double:
+        if ch == "'" and not in_double and not btick:
             in_single = not in_single; buf += ch; j += 1; continue
         if ch == '"' and not in_single:
             in_double = not in_double; buf += ch; j += 1; continue
-        if not in_single and not in_double:
+        if ch == '$' and j+1 < n and text[j+1] == '(' and not in_single:
+            subst_depth += 1; buf += ch + text[j+1]; j += 2; continue
+        if ch == ')' and subst_depth > 0 and not in_single:
+            subst_depth -= 1; buf += ch; j += 1; continue
+        if ch == '`' and not in_single:
+            btick = not btick; buf += ch; j += 1; continue
+        if not in_single and not in_double and subst_depth == 0 and not btick:
             if ch == ';':
                 pieces.append((buf, ';')); buf = ''; j += 1; continue
             if ch == '&' and j+1 < n and text[j+1] == '&':
@@ -710,7 +738,7 @@ def split_single_cmd(text):
                 pieces.append((buf, '|')); buf = ''; j += 1; continue
             if ch == '&':
                 if j+1 < n and (text[j+1].isdigit() or text[j+1] in ('{', '-')):
-                    buf += ch; j += 1; continue  # redirect fd ref
+                    buf += ch; j += 1; continue
                 pieces.append((buf, '&')); buf = ''; j += 1; continue
         buf += ch; j += 1
     if buf.strip():
@@ -719,13 +747,13 @@ def split_single_cmd(text):
 
 def check_violation(cmd):
     """Test 8의 Pass A + trailing_op + Pass B 로직. True = violation.
-    subshell `(...)` 안의 wrapper는 trailing `&` 면제 (subshell 전체 background)."""
+    subshell `(...)` 안의 wrapper는 trailing `&` 면제. `(foo` 붙은 paren 포함."""
     pieces = split_single_cmd(cmd)
     if not pieces:
         return False
     first_cmd, first_op = pieces[0]
     raw_tokens = first_cmd.split()
-    starts_in_subshell = bool(raw_tokens) and raw_tokens[0] == '('
+    starts_in_subshell = bool(raw_tokens) and raw_tokens[0].startswith('(')
     leading = strip_leading_modifiers(raw_tokens)
     starts_with_wrapper = bool(leading) and leading[0] == ALLOWED_LAUNCHER
     if starts_with_wrapper:
@@ -753,6 +781,8 @@ FIXTURES = [
     ("codex help (unwrapped)",      "codex --help",                                       False),
     ("gemini version (unwrapped)",  "gemini --version",                                   False),
     ("redirect (not pipeline)",     "_run_with_timeout 300 30 codex exec - 2> err.log",   False),
+    ("cmd-subst pipeline inside",   "_run_with_timeout 300 30 codex exec --note $(cat a | wc -l)", False),
+    ("attached paren subshell bg",  "(_run_with_timeout 300 30 codex exec -) &",           False),
     # === FAIL (violation 이어야 함) ===
     ("codex login (wrapped, CLI 없음)", "_run_with_timeout 300 30 codex login",            True),
     ("bash -lc wrapper",            "_run_with_timeout 300 30 bash -lc 'codex exec -'",   True),
@@ -775,7 +805,7 @@ FIXTURES = [
 
 import hashlib
 
-EXPECTED_FIXTURE_COUNT = 24
+EXPECTED_FIXTURE_COUNT = 26
 if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(
         f"FATAL: FIXTURES count regression — expected {EXPECTED_FIXTURE_COUNT}, got {len(FIXTURES)}",
@@ -784,8 +814,8 @@ if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(f"  If intentional expansion/pruning, update EXPECTED_FIXTURE_COUNT + signature + required sets.", file=sys.stderr)
     sys.exit(1)
 
-# Codex 13차 추가: cmd-substitution + pipeline + background 커버. signature 재계산.
-EXPECTED_FIXTURE_SIGNATURE = "cef746014e0531ae78a1fe5c516c4acbb44d1aa3a38710e67d783cc33bb55b0d"
+# Codex 14차 추가: cmd-subst pipeline inside + attached paren subshell. signature 재계산.
+EXPECTED_FIXTURE_SIGNATURE = "6771d62ca94178ae1b491cedcdd96fa450317e4e49627debde08cc9e18fce0fd"
 _sig_input = "\n".join(f"{d}|{c}|{e}" for d, c, e in FIXTURES)
 _actual_sig = hashlib.sha256(_sig_input.encode()).hexdigest()
 if _actual_sig != EXPECTED_FIXTURE_SIGNATURE:
@@ -812,6 +842,7 @@ REQUIRED_OK_DESCS = {
     "quoted CLI in echo", "quoted gemini in echo",
     "codex help (unwrapped)", "gemini version (unwrapped)",
     "redirect (not pipeline)",
+    "cmd-subst pipeline inside", "attached paren subshell bg",
 }
 _fixture_map = {d: (c, e) for d, c, e in FIXTURES}
 _identity_errors = []
