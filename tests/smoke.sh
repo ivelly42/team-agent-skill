@@ -943,11 +943,12 @@ FIXTURES = [
     ('and-and chained codex',       '_run_with_timeout 300 30 codex exec - && codex exec -',             True),
     ('gemini wrapped without -p',   '_run_with_timeout 300 30 gemini --version',                          True),
     ('gemini quoted -p bypass',     '_run_with_timeout 300 30 gemini "document -p behavior"',             True),
+    ('gemini ANSI-C quoted -p',     "_run_with_timeout 300 30 gemini $'document -p behavior'",           True),
 ]
 
 import hashlib
 
-EXPECTED_FIXTURE_COUNT = 40
+EXPECTED_FIXTURE_COUNT = 41
 if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(
         f"FATAL: FIXTURES count regression — expected {EXPECTED_FIXTURE_COUNT}, got {len(FIXTURES)}",
@@ -957,7 +958,7 @@ if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     sys.exit(1)
 
 # Codex 19차 추가: cmd-subst/backtick 내부 inert quoted literal 3개 OK fixture.
-EXPECTED_FIXTURE_SIGNATURE = "94dae4f771a08b4dc716a277cd323e18fdceb5a65647ea435b45af0e2ff84bbd"
+EXPECTED_FIXTURE_SIGNATURE = "64aced4d4483e41c94b84c00bb2d8b6c89a919f7d9d9f1eed23e9f635dfcd767"
 _sig_input = "\n".join(f"{d}|{c}|{e}" for d, c, e in FIXTURES)
 _actual_sig = hashlib.sha256(_sig_input.encode()).hexdigest()
 if _actual_sig != EXPECTED_FIXTURE_SIGNATURE:
@@ -984,6 +985,7 @@ REQUIRED_BYPASS_DESCS = {
     "semicolon chained codex", "and-and chained codex",
     "gemini wrapped without -p",
     "gemini quoted -p bypass",
+    "gemini ANSI-C quoted -p",
 }
 REQUIRED_OK_DESCS = {
     "direct codex child", "direct gemini child",
