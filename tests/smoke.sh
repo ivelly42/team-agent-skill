@@ -290,7 +290,9 @@ def strip_quoted_regions(text):
                         break
                 k += 1
             body = text[body_start:k]
-            # 재귀 quote-strip: 내부 quoted literal도 blank됨.
+            # outer shell escape(`\"`, `\'`, `\\`, `\``, `\$`)를 먼저 unescape —
+            # 내부 context에선 escape가 literal로 해석됨 → quote state 변화 유발.
+            body = _unescape_shell_meta(body)
             stripped = strip_quoted_regions(body)
             out.extend(stripped)
             if k < n:
@@ -306,6 +308,7 @@ def strip_quoted_regions(text):
                     k += 2; continue
                 k += 1
             body = text[body_start:k]
+            body = _unescape_shell_meta(body)
             stripped = strip_quoted_regions(body)
             out.extend(stripped)
             if k < n:
