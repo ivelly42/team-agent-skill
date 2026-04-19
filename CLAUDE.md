@@ -21,4 +21,4 @@
 ```
 
 ## Current Status
-[2026-04-20] Codex 14차 findings 2건 수정: (1) split_commands / split_single_cmd에 `$(...)` + backtick nesting 깊이 추적 — 내부 `|`/`&`는 top-level operator 아님. `_run_with_timeout ... $(cat a | wc -l)` 더 이상 false positive 아님. (2) `strip_leading_modifiers` / `starts_in_subshell`이 `(foo` 붙은 paren도 인식 — `(_run_with_timeout ...) &` 공백 유무와 무관하게 subshell 면제 적용. Test 10 fixture 24→26 (cmd-subst pipeline inside, attached paren subshell), signature `6771d62ca941...`. REQUIRED_BYPASS 17 / REQUIRED_OK 9. smoke 10/10 + schema 6/6 = 16 PASS. Codex 15차 대기.
+[2026-04-20] Codex 15차 findings 2건 수정: (1) subshell exemption을 `&` 에만 한정 — `|`는 subshell 내부/외부 무관하게 항상 violation (wrapper rc가 파이프 오른쪽으로 숨겨짐). `(_run_with_timeout ... | tee)` 이제 detect. (2) `$()` depth tracker가 double-quote 내부 `)`를 무시하도록 수정 — `$(printf ")" | wc -c)` 같은 정상 command false positive 제거. Test 10 fixture 26→29 (subshell inner pipe × 2 FAIL + quoted paren OK), signature `a7341f9b4390...`. REQUIRED_BYPASS 19 / REQUIRED_OK 10. smoke 10/10 + schema 6/6 = 16 PASS. Codex 16차 대기.

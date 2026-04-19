@@ -343,11 +343,14 @@ def split_commands(block_lines):
             # $() / `...` 추적 — 내부의 |/& 는 top-level operator 아님 (Codex 14차 [high])
             if ch == '$' and j+1 < n and text[j+1] == '(' and not in_single:
                 subst_depth += 1; buf += ch + text[j+1]; j += 2; continue
-            if ch == ')' and subst_depth > 0 and not in_single:
+            # Codex 15차 [medium]: `)` 는 단/쌍 따옴표 밖에서만 subst_depth 감소.
+            if ch == ')' and subst_depth > 0 and not in_single and not in_double:
                 subst_depth -= 1; buf += ch; j += 1; continue
             if ch == '`' and not in_single:
                 btick = not btick; buf += ch; j += 1; continue
-            # top-level operator는 quote/subst/backtick 밖에서만
+            # top-level operator는 quote/subst/backtick 밖에서만.
+            # (subshell 내부 operator는 split 하되, Pass A가 `|`를 항상 violation으로
+            #  잡도록 exemption을 `&` 만 허용하는 방식으로 처리.)
             if not in_single and not in_double and subst_depth == 0 and not btick:
                 if ch == ';':
                     pieces.append((buf, ';')); buf = ''; j += 1; continue
@@ -427,12 +430,17 @@ for path in files:
                 ok, reason = validate_wrapped(cmd)
                 if not ok:
                     violations.append(f"{path}:{cmd_lineno} {reason} :: {cmd[:140]}")
-                # Codex 13차 [medium]: pipeline/background operator는 wrapper return
-                # code를 가리거나 process를 detach. 단 subshell 내부 wrapper의 `&`는
-                # subshell 전체에 속하므로 예외.
-                if trailing_op in ('|', '&') and not starts_in_subshell:
+                # Codex 13차/15차: `|` 는 subshell 안/밖 무관하게 항상 violation —
+                # wrapper rc가 파이프 오른쪽으로 넘어가 숨겨진다. `&` 는 subshell
+                # 전체 background(`(...) &`) 인 경우만 예외 — subshell이 wrapper rc를
+                # capture해서 처리하기 때문.
+                if trailing_op == '|':
                     violations.append(
-                        f"{path}:{cmd_lineno} wrapped-in-pipeline op={trailing_op!r} :: {cmd[:120]}"
+                        f"{path}:{cmd_lineno} wrapped-in-pipeline op='|' :: {cmd[:120]}"
+                    )
+                elif trailing_op == '&' and not starts_in_subshell:
+                    violations.append(
+                        f"{path}:{cmd_lineno} wrapped-in-background op='&' :: {cmd[:120]}"
                     )
                 continue
 
@@ -723,7 +731,7 @@ def split_single_cmd(text):
             in_double = not in_double; buf += ch; j += 1; continue
         if ch == '$' and j+1 < n and text[j+1] == '(' and not in_single:
             subst_depth += 1; buf += ch + text[j+1]; j += 2; continue
-        if ch == ')' and subst_depth > 0 and not in_single:
+        if ch == ')' and subst_depth > 0 and not in_single and not in_double:
             subst_depth -= 1; buf += ch; j += 1; continue
         if ch == '`' and not in_single:
             btick = not btick; buf += ch; j += 1; continue
@@ -760,7 +768,10 @@ def check_violation(cmd):
         ok, _ = validate_wrapped(first_cmd)
         if not ok:
             return True
-        if first_op in ('|', '&') and not starts_in_subshell:
+        # `|` 는 항상 violation, `&` 는 subshell 아닐 때만 violation (Codex 15차).
+        if first_op == '|':
+            return True
+        if first_op == '&' and not starts_in_subshell:
             return True
         for p, _ in pieces[1:]:
             p_unq = strip_quoted_regions(p)
@@ -783,6 +794,7 @@ FIXTURES = [
     ("redirect (not pipeline)",     "_run_with_timeout 300 30 codex exec - 2> err.log",   False),
     ("cmd-subst pipeline inside",   "_run_with_timeout 300 30 codex exec --note $(cat a | wc -l)", False),
     ("attached paren subshell bg",  "(_run_with_timeout 300 30 codex exec -) &",           False),
+    ("cmd-subst quoted paren",      '_run_with_timeout 300 30 codex exec --note $(printf ")" | wc -c)', False),
     # === FAIL (violation 이어야 함) ===
     ("codex login (wrapped, CLI 없음)", "_run_with_timeout 300 30 codex login",            True),
     ("bash -lc wrapper",            "_run_with_timeout 300 30 bash -lc 'codex exec -'",   True),
@@ -801,11 +813,13 @@ FIXTURES = [
     ("backtick substitution",       "OUT=`codex exec -`",                                  True),
     ("wrapper pipe",                "_run_with_timeout 300 30 codex exec - | tee out",     True),
     ("wrapper background",          "_run_with_timeout 300 30 gemini -m x -p - &",         True),
+    ("subshell with inner pipe",    "(_run_with_timeout 300 30 codex exec - | tee out)",   True),
+    ("subshell inner pipe bg",      "(_run_with_timeout 300 30 codex exec - | tee out) &", True),
 ]
 
 import hashlib
 
-EXPECTED_FIXTURE_COUNT = 26
+EXPECTED_FIXTURE_COUNT = 29
 if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(
         f"FATAL: FIXTURES count regression — expected {EXPECTED_FIXTURE_COUNT}, got {len(FIXTURES)}",
@@ -814,8 +828,8 @@ if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(f"  If intentional expansion/pruning, update EXPECTED_FIXTURE_COUNT + signature + required sets.", file=sys.stderr)
     sys.exit(1)
 
-# Codex 14차 추가: cmd-subst pipeline inside + attached paren subshell. signature 재계산.
-EXPECTED_FIXTURE_SIGNATURE = "6771d62ca94178ae1b491cedcdd96fa450317e4e49627debde08cc9e18fce0fd"
+# Codex 15차 추가: subshell inner pipe FAIL + cmd-subst quoted paren OK.
+EXPECTED_FIXTURE_SIGNATURE = "a7341f9b439042a6b116887034a67287301c17c935db06bc442e810eff4ec679"
 _sig_input = "\n".join(f"{d}|{c}|{e}" for d, c, e in FIXTURES)
 _actual_sig = hashlib.sha256(_sig_input.encode()).hexdigest()
 if _actual_sig != EXPECTED_FIXTURE_SIGNATURE:
@@ -836,6 +850,7 @@ REQUIRED_BYPASS_DESCS = {
     "cmd-substitution in dquote", "echo cmd-substitution",
     "backtick substitution",
     "wrapper pipe", "wrapper background",
+    "subshell with inner pipe", "subshell inner pipe bg",
 }
 REQUIRED_OK_DESCS = {
     "direct codex child", "direct gemini child",
@@ -843,6 +858,7 @@ REQUIRED_OK_DESCS = {
     "codex help (unwrapped)", "gemini version (unwrapped)",
     "redirect (not pipeline)",
     "cmd-subst pipeline inside", "attached paren subshell bg",
+    "cmd-subst quoted paren",
 }
 _fixture_map = {d: (c, e) for d, c, e in FIXTURES}
 _identity_errors = []
