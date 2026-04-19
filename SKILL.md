@@ -1,6 +1,6 @@
 ---
 name: team-agent
-argument-hint: "[--auto] [--deep] [--dry-run] [--codex [all|hybrid]] [--scope <path>] [--resume <RUN_ID>] [--diff [base]] [--notify telegram] <작업 목적>"
+argument-hint: "[--auto] [--deep] [--dry-run] [--codex [all|hybrid]] [--gemini [all|hybrid]] [--cross] [--scope <path>] [--resume <RUN_ID>] [--diff [base]] [--notify telegram] <작업 목적>"
 description: |
   범용 팀 에이전트 구성 — 프로젝트 분석 후 최적 에이전트 팀 자동 추천 및 실행.
   대화형으로 목적 파악, Agent 도구로 팀 구성 및 병렬 작업. Codex 교차 검증 포함.
@@ -155,6 +155,8 @@ LLM은 위 스크립트를 Bash 도구로 실행한다. `_SKILL_DIR`은 Preamble
   --diff [base]          변경 파일만 분석 (기본: HEAD~1, PR 리뷰용)
   --notify telegram      완료 시 텔레그램으로 요약 알림 전송
   --codex [all|hybrid]   Codex(GPT) 서브에이전트 사용 (기본: hybrid — 역할별 자동 배분)
+  --gemini [all|hybrid]  Gemini 서브에이전트 사용 (기본: hybrid). --codex와 상호 배타
+  --cross                Claude + Codex + Gemini 3-way + 3중 검증 자동 활성화
 
 예시:
   /team-agent 보안 점검
@@ -168,6 +170,8 @@ LLM은 위 스크립트를 Bash 도구로 실행한다. `_SKILL_DIR`은 Preamble
   /team-agent --codex 전체 점검         (하이브리드: 정밀→Claude, 나머지→Codex)
   /team-agent --codex all 코드 리뷰     (전원 Codex, 비용 최소)
   /team-agent 버그 디버깅 및 테스트 보강
+  /team-agent --gemini 코드 리뷰         (Gemini 하이브리드)
+  /team-agent --cross 전체 감사          (3-way + 3중 검증)
   /team-agent update                     (최신 버전으로 업데이트)
 ```
 
