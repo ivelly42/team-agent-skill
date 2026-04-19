@@ -243,6 +243,18 @@ def extract_bash_blocks(lines):
             block_lines.append((i, ln))
     return blocks
 
+def _unescape_shell_meta(s):
+    """Outer-level shell escapes (`\\"`, `\\'`, `\\\\`, `\\\``, `\\$`) 를 그에 해당하는
+    literal 한 글자로 반환. Codex 19/20/21차: `$()`, backtick body recursion 전 단계에
+    적용해 내부에서 quote state 변화가 올바르게 이루어지도록 한다."""
+    out = []; i = 0; n = len(s)
+    while i < n:
+        if s[i] == '\\' and i + 1 < n and s[i+1] in ('"', "'", '\\', '`', '$'):
+            out.append(s[i+1]); i += 2
+        else:
+            out.append(s[i]); i += 1
+    return ''.join(out)
+
 def strip_quoted_regions(text):
     """Codex 19차 [medium] 해결: `$(...)` 와 backtick body를 재귀적으로 quote-strip.
     내부의 inert quoted literal(`printf "codex exec"`)도 blank 처리.
