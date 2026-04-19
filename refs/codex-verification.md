@@ -85,15 +85,24 @@ LLM은 `{PROJECT_DIR}`, `{TASK_PURPOSE}`, `{FINDINGS_SUMMARY}`, `{IDEAS_SUMMARY}
 # 3-tier timeout wrapper (refs/timeout-wrapper.sh와 동일 구현, self-contained).
 # 이유: 검증 단계에서 codex CLI가 auth stall / network wedge / hang하면 전체 run 블록.
 _TIMEOUT_BIN=""
-command -v timeout >/dev/null 2>&1 && _TIMEOUT_BIN="timeout"
-[ -z "$_TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && _TIMEOUT_BIN="gtimeout"
+if command -v timeout >/dev/null 2>&1; then
+    _TIMEOUT_BIN="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+    _TIMEOUT_BIN="gtimeout"
+fi
+
 _run_with_timeout() {
-  local _secs="$1"; shift; local _grace="$1"; shift
-  if [ -n "$_TIMEOUT_BIN" ]; then
-    "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"; return $?
-  fi
-  # Python watchdog — `python3 -c` (NOT heredoc): stdin 보존 필수 (codex exec -는 fd 0 읽음)
-  python3 -c '
+    # $1=secs, $2=grace_secs, $@=cmd...
+    local _secs="$1"; shift
+    local _grace="$1"; shift
+    if [ -n "$_TIMEOUT_BIN" ]; then
+        "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"
+        return $?
+    fi
+    # Python watchdog fallback — `python3 -c` with argv preserves child stdin.
+    # heredoc은 절대 사용하지 말 것: fd 0을 heredoc 바이트로 대체하여 child가
+    # prompt 대신 EOF를 받는 silent failure 발생.
+    python3 -c '
 import os, signal, subprocess, sys
 secs = int(sys.argv[1]); grace = int(sys.argv[2]); cmd = sys.argv[3:]
 if not cmd:
@@ -117,7 +126,7 @@ except subprocess.TimeoutExpired:
         p.wait()
         sys.exit(137)
 ' "$_secs" "$_grace" "$@"
-  return $?
+    return $?
 }
 
 _VERIFY_PROMPT="/tmp/ta-RUN_ID_VALUE-codex-verify.txt"

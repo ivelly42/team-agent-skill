@@ -400,28 +400,27 @@ PYEOF
 }
 
 # ───────────────────────────────────────────────────────────
-# Test 9: canonical byte-exact parity + pinned hash + exact copy counts
-# Codex 9차 [medium] 해결: relative equality만 체크하던 것을
-#   (1) canonical SHA256 pin
-#   (2) per-file 정확한 body count (SKILL.md=4, verification 3종=각1, total=7)
-# 로 강화. 협조적 drift (canonical + 복사본 동시 수정) 와 missing-copy 도 잡힌다.
+# Test 9: canonical wrapper 전체(preamble + function) byte-exact parity
+# Codex 10차 [medium] 해결: Python body만 비교하던 것을 shell-side
+# (`_TIMEOUT_BIN` 선택 / argument plumbing / return handling / function 구조)
+# 까지 포함한 full block byte-exact 비교로 확장.
 # ───────────────────────────────────────────────────────────
-# 현재 canonical hash — 이 값이 바뀌면 의도된 wrapper 변경이므로 반드시 테스트에서
-# 업데이트. 값을 바꾸는 커밋은 의도적 canonical 리팩터여야 한다.
-EXPECTED_CANONICAL_SHA256="7c923c0bc49f95deaee8d51931905dac8bc095cba5aad7ffbecf7bf45f9b80a1"
+# 현재 canonical full-block SHA256. 값이 바뀌면 의도된 wrapper 변경이므로 반드시
+# 테스트에서 업데이트. 바꾸는 커밋은 의도적 canonical 리팩터여야 한다.
+EXPECTED_CANONICAL_SHA256="8c217c34c677edef9ea43cefcf89cb926cbc4afff39e0e3c20a8beebd89eaffb"
 test_timeout_wrapper_parity() {
-    local name="canonical ↔ 인라인 wrapper byte-exact parity (pinned hash + counts)"
+    local name="canonical ↔ 인라인 wrapper full-block byte-exact parity"
     local canonical="$SKILL_DIR/refs/timeout-wrapper.sh"
     local inlines=("$SKILL_DIR/SKILL.md" "$SKILL_DIR/refs/codex-verification.md" \
                    "$SKILL_DIR/refs/cross-verification.md" "$SKILL_DIR/refs/gemini-verification.md")
 
     python3 - "$EXPECTED_CANONICAL_SHA256" "$canonical" "${inlines[@]}" <<'PYEOF'
-import hashlib, os, re, sys
+import hashlib, re, sys
 expected_hash = sys.argv[1]
 canonical_path = sys.argv[2]
 inline_paths = sys.argv[3:]
 
-# 각 파일별 반드시 존재해야 할 body 개수. 누락 = violation.
+# 각 파일별 반드시 존재해야 할 wrapper block 개수. 누락/추가 = violation.
 EXPECTED_COUNTS = {
     'SKILL.md': 4,
     'refs/codex-verification.md': 1,
@@ -430,7 +429,36 @@ EXPECTED_COUNTS = {
 }
 EXPECTED_TOTAL = sum(EXPECTED_COUNTS.values())  # 7
 
-PY_BODY_RE = re.compile(r"python3\s+-c\s+'\n(.*?)\n'\s*\"\$_secs\"", re.DOTALL)
+def extract_wrapper_blocks(text):
+    """`_TIMEOUT_BIN=""` 부터 `_run_with_timeout() { ... }` closing `}` 까지
+    전체 wrapper block을 추출 (중첩 brace 정확히 매칭)."""
+    blocks = []
+    pos = 0
+    while pos < len(text):
+        m = re.search(r'^_TIMEOUT_BIN=""', text[pos:], re.MULTILINE)
+        if not m:
+            break
+        block_start = pos + m.start()
+        fn_m = re.search(r'_run_with_timeout\(\)\s*\{', text[block_start:])
+        if not fn_m:
+            pos = block_start + len(m.group())
+            continue
+        body_start = block_start + fn_m.end()
+        depth = 1
+        i = body_start
+        while i < len(text) and depth > 0:
+            c = text[i]
+            if c == '{': depth += 1
+            elif c == '}': depth -= 1
+            if depth == 0: break
+            i += 1
+        if depth != 0:
+            pos = body_start
+            continue
+        block_end = i + 1  # closing } 포함
+        blocks.append(text[block_start:block_end])
+        pos = block_end
+    return blocks
 
 try:
     with open(canonical_path, encoding='utf-8') as f:
@@ -438,11 +466,11 @@ try:
 except FileNotFoundError:
     print(f"FATAL: canonical missing: {canonical_path}", file=sys.stderr); sys.exit(2)
 
-canonical_bodies = PY_BODY_RE.findall(canonical_text)
-if not canonical_bodies:
-    print(f"FATAL: canonical has no python3 -c body: {canonical_path}", file=sys.stderr); sys.exit(2)
-canonical_body = canonical_bodies[0]
-canonical_hash = hashlib.sha256(canonical_body.encode()).hexdigest()
+canonical_blocks = extract_wrapper_blocks(canonical_text)
+if not canonical_blocks:
+    print(f"FATAL: canonical has no _run_with_timeout block: {canonical_path}", file=sys.stderr); sys.exit(2)
+canonical_block = canonical_blocks[0]
+canonical_hash = hashlib.sha256(canonical_block.encode()).hexdigest()
 
 # (1) canonical hash가 pinned 값과 일치해야 함 (coordinated drift 방지)
 if canonical_hash != expected_hash:
@@ -453,10 +481,7 @@ if canonical_hash != expected_hash:
     print(f"  → 의도적 wrapper 변경이면 EXPECTED_CANONICAL_SHA256를 새 값으로 업데이트", file=sys.stderr)
     sys.exit(1)
 
-# inline 파일별 body 집계
 def rel_key(path):
-    # SKILL_DIR 하위 상대경로 추출 (tests 디렉토리 기준 상위)
-    # 단순히 basename 또는 refs/basename
     parts = path.split('/')
     if 'refs' in parts:
         idx = parts.index('refs')
@@ -472,23 +497,23 @@ for path in inline_paths:
             text = f.read()
     except FileNotFoundError:
         violations.append(f"{rel}: file missing"); actual_counts[rel] = 0; continue
-    bodies = PY_BODY_RE.findall(text)
-    actual_counts[rel] = len(bodies)
-    for idx, body in enumerate(bodies, 1):
-        if body != canonical_body:
-            body_hash = hashlib.sha256(body.encode()).hexdigest()[:12]
-            clines = canonical_body.splitlines()
-            blines = body.splitlines()
+    blocks = extract_wrapper_blocks(text)
+    actual_counts[rel] = len(blocks)
+    for idx, block in enumerate(blocks, 1):
+        if block != canonical_block:
+            block_hash = hashlib.sha256(block.encode()).hexdigest()[:12]
+            clines = canonical_block.splitlines()
+            blines = block.splitlines()
             diffs = []
             for i in range(max(len(clines), len(blines))):
                 c = clines[i] if i < len(clines) else '<EOF>'
                 b = blines[i] if i < len(blines) else '<EOF>'
                 if c != b:
                     diffs.append(f"    L{i+1}: canonical={c!r} inline={b!r}")
-                    if len(diffs) >= 3:
+                    if len(diffs) >= 5:
                         break
             violations.append(
-                f"{rel} body#{idx}: hash={body_hash} drift vs canonical\n" + '\n'.join(diffs)
+                f"{rel} block#{idx}: hash={block_hash} drift vs canonical\n" + '\n'.join(diffs)
             )
 
 # (2) per-file count 검증
@@ -496,21 +521,21 @@ for expected_rel, expected_n in EXPECTED_COUNTS.items():
     got = actual_counts.get(expected_rel, 0)
     if got != expected_n:
         violations.append(
-            f"{expected_rel}: expected exactly {expected_n} inline body(ies), got {got}"
+            f"{expected_rel}: expected exactly {expected_n} wrapper block(s), got {got}"
         )
 
 # (3) total count 검증
 total = sum(actual_counts.values())
 if total != EXPECTED_TOTAL:
-    violations.append(f"total: expected {EXPECTED_TOTAL} inline copies, got {total}")
+    violations.append(f"total: expected {EXPECTED_TOTAL} wrapper blocks, got {total}")
 
 if violations:
     print(f"[test_9] canonical pinned hash: {expected_hash[:12]}... OK", file=sys.stderr)
     print(f"[test_9] {len(violations)} violation(s):", file=sys.stderr)
     for v in violations: print(v, file=sys.stderr)
     sys.exit(1)
-print(f"[test_9] canonical hash pinned at {expected_hash[:12]}...")
-print(f"[test_9] all {total} inline copies byte-equal across {len(EXPECTED_COUNTS)} files")
+print(f"[test_9] canonical full-block hash pinned at {expected_hash[:12]}...")
+print(f"[test_9] all {total} inline wrapper blocks byte-equal across {len(EXPECTED_COUNTS)} files")
 sys.exit(0)
 PYEOF
     local rc=$?
@@ -620,6 +645,17 @@ FIXTURES = [
     ("FOO=1 timeout bypass",       "FOO=1 timeout 300 codex exec -",                     True),
     ("gtimeout prefix",            "gtimeout 300 codex exec -",                          True),
 ]
+
+# Codex 10차 [high] "fixture shrinkage" 방지: 예상 개수 명시적 assertion.
+# 향후 fixture 삭제가 silent regression을 일으키지 않도록 고정.
+EXPECTED_FIXTURE_COUNT = 15
+if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
+    print(
+        f"FATAL: FIXTURES count regression — expected {EXPECTED_FIXTURE_COUNT}, got {len(FIXTURES)}",
+        file=sys.stderr,
+    )
+    print(f"  If intentional expansion/pruning, update EXPECTED_FIXTURE_COUNT.", file=sys.stderr)
+    sys.exit(1)
 
 failures = []
 for desc, cmd, expect in FIXTURES:

@@ -83,26 +83,23 @@ suggested_severity: "Critical" | "High" | "Medium" | "Low" | "Info"
 # Python 3가 없는 환경은 가정하지 않는다 (skill 자체가 python3 의존).
 _TIMEOUT_BIN=""
 if command -v timeout >/dev/null 2>&1; then
-  _TIMEOUT_BIN="timeout"
+    _TIMEOUT_BIN="timeout"
 elif command -v gtimeout >/dev/null 2>&1; then
-  _TIMEOUT_BIN="gtimeout"
+    _TIMEOUT_BIN="gtimeout"
 fi
 
-# SIGTERM → grace → SIGKILL. 3단 fallback: 어떤 환경에서도 hang 없음 (fail-closed).
 _run_with_timeout() {
-  # $1=secs, $2=grace_secs, $@=cmd...
-  local _secs="$1"; shift
-  local _grace="$1"; shift
-  if [ -n "$_TIMEOUT_BIN" ]; then
-    "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"
-    return $?
-  fi
-
-  # Python watchdog fallback — hang 방지 필수. GNU coreutils 없는 bare macOS에서도 작동.
-  # CRITICAL: `python3 -c` 사용 (heredoc 금지). heredoc을 쓰면 Python의 fd 0이 heredoc 바이트로 대체되어
-  # 자식 프로세스(codex exec -, gemini -p -)가 prompt 대신 EOF를 받는다.
-  # `-c`는 script를 argv로 전달하므로 stdin이 보존되고, Popen이 기본적으로 fd 0을 상속한다.
-  python3 -c '
+    # $1=secs, $2=grace_secs, $@=cmd...
+    local _secs="$1"; shift
+    local _grace="$1"; shift
+    if [ -n "$_TIMEOUT_BIN" ]; then
+        "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"
+        return $?
+    fi
+    # Python watchdog fallback — `python3 -c` with argv preserves child stdin.
+    # heredoc은 절대 사용하지 말 것: fd 0을 heredoc 바이트로 대체하여 child가
+    # prompt 대신 EOF를 받는 silent failure 발생.
+    python3 -c '
 import os, signal, subprocess, sys
 secs = int(sys.argv[1]); grace = int(sys.argv[2]); cmd = sys.argv[3:]
 if not cmd:
@@ -126,7 +123,7 @@ except subprocess.TimeoutExpired:
         p.wait()
         sys.exit(137)
 ' "$_secs" "$_grace" "$@"
-  return $?
+    return $?
 }
 
 # ───────────────────────────────────────────────────────────

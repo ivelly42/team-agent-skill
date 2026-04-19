@@ -1221,14 +1221,24 @@ def extract_codemap_json(text):
 # 3-tier timeout wrapper (refs/timeout-wrapper.sh와 동일). 일관성을 위해 Phase 0.3도
 # 동일 `_run_with_timeout` 사용 — bare `timeout` 명령은 GNU coreutils 없는 환경에서 hang.
 _TIMEOUT_BIN=""
-command -v timeout >/dev/null 2>&1 && _TIMEOUT_BIN="timeout"
-[ -z "$_TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && _TIMEOUT_BIN="gtimeout"
+if command -v timeout >/dev/null 2>&1; then
+    _TIMEOUT_BIN="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+    _TIMEOUT_BIN="gtimeout"
+fi
+
 _run_with_timeout() {
-  local _secs="$1"; shift; local _grace="$1"; shift
-  if [ -n "$_TIMEOUT_BIN" ]; then
-    "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"; return $?
-  fi
-  python3 -c '
+    # $1=secs, $2=grace_secs, $@=cmd...
+    local _secs="$1"; shift
+    local _grace="$1"; shift
+    if [ -n "$_TIMEOUT_BIN" ]; then
+        "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"
+        return $?
+    fi
+    # Python watchdog fallback — `python3 -c` with argv preserves child stdin.
+    # heredoc은 절대 사용하지 말 것: fd 0을 heredoc 바이트로 대체하여 child가
+    # prompt 대신 EOF를 받는 silent failure 발생.
+    python3 -c '
 import os, signal, subprocess, sys
 secs = int(sys.argv[1]); grace = int(sys.argv[2]); cmd = sys.argv[3:]
 if not cmd:
@@ -1252,7 +1262,7 @@ except subprocess.TimeoutExpired:
         p.wait()
         sys.exit(137)
 ' "$_secs" "$_grace" "$@"
-  return $?
+    return $?
 }
 
 _SCHEMA="${_SKILL_DIR}/refs/codemap-schema.json"
@@ -1270,14 +1280,24 @@ _CODEMAP_RC=$?
 ```bash
 # 동일 3-tier 래퍼 (inline). 일관성 + Phase 0.3에서도 hang-closed.
 _TIMEOUT_BIN=""
-command -v timeout >/dev/null 2>&1 && _TIMEOUT_BIN="timeout"
-[ -z "$_TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && _TIMEOUT_BIN="gtimeout"
+if command -v timeout >/dev/null 2>&1; then
+    _TIMEOUT_BIN="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+    _TIMEOUT_BIN="gtimeout"
+fi
+
 _run_with_timeout() {
-  local _secs="$1"; shift; local _grace="$1"; shift
-  if [ -n "$_TIMEOUT_BIN" ]; then
-    "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"; return $?
-  fi
-  python3 -c '
+    # $1=secs, $2=grace_secs, $@=cmd...
+    local _secs="$1"; shift
+    local _grace="$1"; shift
+    if [ -n "$_TIMEOUT_BIN" ]; then
+        "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"
+        return $?
+    fi
+    # Python watchdog fallback — `python3 -c` with argv preserves child stdin.
+    # heredoc은 절대 사용하지 말 것: fd 0을 heredoc 바이트로 대체하여 child가
+    # prompt 대신 EOF를 받는 silent failure 발생.
+    python3 -c '
 import os, signal, subprocess, sys
 secs = int(sys.argv[1]); grace = int(sys.argv[2]); cmd = sys.argv[3:]
 if not cmd:
@@ -1301,7 +1321,7 @@ except subprocess.TimeoutExpired:
         p.wait()
         sys.exit(137)
 ' "$_secs" "$_grace" "$@"
-  return $?
+    return $?
 }
 
 _SCHEMA="${_SKILL_DIR}/refs/codemap-schema.json"
@@ -1470,16 +1490,24 @@ Agent 도구 대신 Bash 도구로 `codex exec`를 호출한다. 표준 패턴:
 # 이유: skill 실행 환경에서 source 가능 여부 불명확 → 매 bash 블록에 self-contained.
 # 3-tier: GNU timeout → gtimeout → Python watchdog (모두 fail-closed, 무한 대기 없음).
 _TIMEOUT_BIN=""
-command -v timeout >/dev/null 2>&1 && _TIMEOUT_BIN="timeout"
-[ -z "$_TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && _TIMEOUT_BIN="gtimeout"
+if command -v timeout >/dev/null 2>&1; then
+    _TIMEOUT_BIN="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+    _TIMEOUT_BIN="gtimeout"
+fi
+
 _run_with_timeout() {
-  local _secs="$1"; shift; local _grace="$1"; shift
-  if [ -n "$_TIMEOUT_BIN" ]; then
-    "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"; return $?
-  fi
-  # Python watchdog — `python3 -c` (NOT heredoc): heredoc은 fd 0 점유 → child가
-  # prompt 대신 EOF 수신. stdin=sys.stdin으로 명시 상속.
-  python3 -c '
+    # $1=secs, $2=grace_secs, $@=cmd...
+    local _secs="$1"; shift
+    local _grace="$1"; shift
+    if [ -n "$_TIMEOUT_BIN" ]; then
+        "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"
+        return $?
+    fi
+    # Python watchdog fallback — `python3 -c` with argv preserves child stdin.
+    # heredoc은 절대 사용하지 말 것: fd 0을 heredoc 바이트로 대체하여 child가
+    # prompt 대신 EOF를 받는 silent failure 발생.
+    python3 -c '
 import os, signal, subprocess, sys
 secs = int(sys.argv[1]); grace = int(sys.argv[2]); cmd = sys.argv[3:]
 if not cmd:
@@ -1503,7 +1531,7 @@ except subprocess.TimeoutExpired:
         p.wait()
         sys.exit(137)
 ' "$_secs" "$_grace" "$@"
-  return $?
+    return $?
 }
 
 _SCHEMA="${_SKILL_DIR}/refs/output-schema.json"
@@ -1548,14 +1576,24 @@ Agent 도구 대신 Bash 도구로 `gemini -p`를 호출한다:
 ```bash
 # Codex 블록과 동일한 포터블 timeout 래퍼. refs/timeout-wrapper.sh 참조.
 _TIMEOUT_BIN=""
-command -v timeout >/dev/null 2>&1 && _TIMEOUT_BIN="timeout"
-[ -z "$_TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && _TIMEOUT_BIN="gtimeout"
+if command -v timeout >/dev/null 2>&1; then
+    _TIMEOUT_BIN="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+    _TIMEOUT_BIN="gtimeout"
+fi
+
 _run_with_timeout() {
-  local _secs="$1"; shift; local _grace="$1"; shift
-  if [ -n "$_TIMEOUT_BIN" ]; then
-    "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"; return $?
-  fi
-  python3 -c '
+    # $1=secs, $2=grace_secs, $@=cmd...
+    local _secs="$1"; shift
+    local _grace="$1"; shift
+    if [ -n "$_TIMEOUT_BIN" ]; then
+        "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"
+        return $?
+    fi
+    # Python watchdog fallback — `python3 -c` with argv preserves child stdin.
+    # heredoc은 절대 사용하지 말 것: fd 0을 heredoc 바이트로 대체하여 child가
+    # prompt 대신 EOF를 받는 silent failure 발생.
+    python3 -c '
 import os, signal, subprocess, sys
 secs = int(sys.argv[1]); grace = int(sys.argv[2]); cmd = sys.argv[3:]
 if not cmd:
@@ -1579,7 +1617,7 @@ except subprocess.TimeoutExpired:
         p.wait()
         sys.exit(137)
 ' "$_secs" "$_grace" "$@"
-  return $?
+    return $?
 }
 
 _SCHEMA="${_SKILL_DIR}/refs/output-schema.json"
