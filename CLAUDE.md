@@ -21,4 +21,4 @@
 ```
 
 ## Current Status
-[2026-04-20] Codex 15차 findings 2건 수정: (1) subshell exemption을 `&` 에만 한정 — `|`는 subshell 내부/외부 무관하게 항상 violation (wrapper rc가 파이프 오른쪽으로 숨겨짐). `(_run_with_timeout ... | tee)` 이제 detect. (2) `$()` depth tracker가 double-quote 내부 `)`를 무시하도록 수정 — `$(printf ")" | wc -c)` 같은 정상 command false positive 제거. Test 10 fixture 26→29 (subshell inner pipe × 2 FAIL + quoted paren OK), signature `a7341f9b4390...`. REQUIRED_BYPASS 19 / REQUIRED_OK 10. smoke 10/10 + schema 6/6 = 16 PASS. Codex 16차 대기.
+[2026-04-20] Codex 16차 findings 1건 수정: `"$(printf x)" | tee out` 처럼 double-quoted command substitution 뒤 top-level `|`/`&`가 검사 스킵되던 구멍. 15차에서 `not in_double` 가드가 정상 `$()` 종료(`"$(..)")까지 막았음. 해결: quote_stack per `$()` depth — `$(` 진입 시 (in_single,in_double) push하고 내부 reset, `)` 로 pop. 내부 quote state와 외부가 독립. Test 10 fixture 29→31 (dquoted `$()` pipe/bg bypass 2 FAIL), signature `1d7e5b917a35...`. REQUIRED_BYPASS 21 / REQUIRED_OK 10. smoke 10/10 + schema 6/6 = 16 PASS. Codex 17차 대기.
