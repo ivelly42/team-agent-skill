@@ -17,7 +17,7 @@
           "evidence": { "type": "string" },
           "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
           "action": { "type": "string" },
-          "category": { "type": "string", "enum": ["security", "performance", "quality", "architecture", "testing", "integration", "other"] }
+          "category": { "type": "string", "enum": ["security", "performance", "quality", "architecture", "testing", "integration", "ai-data", "api-contract", "other"] }
         },
         "required": ["severity", "title", "file", "line_start", "line_end", "code_snippet", "evidence", "confidence", "action", "category"]
       }
