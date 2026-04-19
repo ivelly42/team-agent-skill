@@ -21,4 +21,4 @@
 ```
 
 ## Current Status
-[2026-04-20] Codex 16차 findings 1건 수정: `"$(printf x)" | tee out` 처럼 double-quoted command substitution 뒤 top-level `|`/`&`가 검사 스킵되던 구멍. 15차에서 `not in_double` 가드가 정상 `$()` 종료(`"$(..)")까지 막았음. 해결: quote_stack per `$()` depth — `$(` 진입 시 (in_single,in_double) push하고 내부 reset, `)` 로 pop. 내부 quote state와 외부가 독립. Test 10 fixture 29→31 (dquoted `$()` pipe/bg bypass 2 FAIL), signature `1d7e5b917a35...`. REQUIRED_BYPASS 21 / REQUIRED_OK 10. smoke 10/10 + schema 6/6 = 16 PASS. Codex 17차 대기.
+[2026-04-20] Codex 17차 findings 1건 수정: backtick 내부 quote state가 외부로 leak하여 top-level operator split 실패. `` `printf '"'`  | tee out`` 이 하나의 piece로 병합되어 wrapper pipe 감지 실패. 해결: backtick도 `$()`와 동일하게 quote_stack push/pop — backtick 진입 시 현재 quote state를 push하고 내부 reset, 종료 시 pop. Test 10 fixture 31→34 (backtick leak pipe + `;` chained + `&&` chained unwrapped codex), signature `59d07606d53d...`. REQUIRED_BYPASS 24 / REQUIRED_OK 10. smoke 10/10 + schema 6/6 = 16 PASS. Codex 18차 대기.

@@ -339,7 +339,7 @@ def split_commands(block_lines):
             ch = text[j]
             if ch == '\\' and j + 1 < n:
                 buf += ch + text[j+1]; j += 2; continue
-            if ch == "'" and not in_double and not btick:
+            if ch == "'" and not in_double:
                 in_single = not in_single; buf += ch; j += 1; continue
             if ch == '"' and not in_single:
                 in_double = not in_double; buf += ch; j += 1; continue
@@ -352,8 +352,17 @@ def split_commands(block_lines):
                 if quote_stack:
                     in_single, in_double = quote_stack.pop()
                 buf += ch; j += 1; continue
+            # Codex 17차: backtick 안 quote state도 local. push/pop.
             if ch == '`' and not in_single:
-                btick = not btick; buf += ch; j += 1; continue
+                if not btick:
+                    quote_stack.append((in_single, in_double))
+                    in_single = False; in_double = False
+                    btick = True
+                else:
+                    btick = False
+                    if quote_stack:
+                        in_single, in_double = quote_stack.pop()
+                buf += ch; j += 1; continue
             # top-level operator는 quote/subst/backtick 밖에서만.
             # (subshell 내부 operator는 split 하되, Pass A가 `|`를 항상 violation으로
             #  잡도록 exemption을 `&` 만 허용하는 방식으로 처리.)
@@ -732,7 +741,7 @@ def split_single_cmd(text):
         ch = text[j]
         if ch == '\\' and j + 1 < n:
             buf += ch + text[j+1]; j += 2; continue
-        if ch == "'" and not in_double and not btick:
+        if ch == "'" and not in_double:
             in_single = not in_single; buf += ch; j += 1; continue
         if ch == '"' and not in_single:
             in_double = not in_double; buf += ch; j += 1; continue
@@ -746,7 +755,15 @@ def split_single_cmd(text):
                 in_single, in_double = quote_stack.pop()
             buf += ch; j += 1; continue
         if ch == '`' and not in_single:
-            btick = not btick; buf += ch; j += 1; continue
+            if not btick:
+                quote_stack.append((in_single, in_double))
+                in_single = False; in_double = False
+                btick = True
+            else:
+                btick = False
+                if quote_stack:
+                    in_single, in_double = quote_stack.pop()
+            buf += ch; j += 1; continue
         if not in_single and not in_double and subst_depth == 0 and not btick:
             if ch == ';':
                 pieces.append((buf, ';')); buf = ''; j += 1; continue
@@ -829,11 +846,14 @@ FIXTURES = [
     ("subshell inner pipe bg",      "(_run_with_timeout 300 30 codex exec - | tee out) &", True),
     ("dquoted $() pipe bypass",     '_run_with_timeout 300 30 codex exec --note "$(printf x)" | tee out', True),
     ("dquoted $() bg bypass",       '_run_with_timeout 300 30 codex exec --note "$(printf x)" &',         True),
+    ('backtick dquote leak pipe',   '_run_with_timeout 300 30 codex exec --note `printf \'"\'` | tee out', True),
+    ('semicolon chained codex',     '_run_with_timeout 300 30 codex exec - ; codex exec -',               True),
+    ('and-and chained codex',       '_run_with_timeout 300 30 codex exec - && codex exec -',             True),
 ]
 
 import hashlib
 
-EXPECTED_FIXTURE_COUNT = 31
+EXPECTED_FIXTURE_COUNT = 34
 if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(
         f"FATAL: FIXTURES count regression — expected {EXPECTED_FIXTURE_COUNT}, got {len(FIXTURES)}",
@@ -842,8 +862,8 @@ if len(FIXTURES) != EXPECTED_FIXTURE_COUNT:
     print(f"  If intentional expansion/pruning, update EXPECTED_FIXTURE_COUNT + signature + required sets.", file=sys.stderr)
     sys.exit(1)
 
-# Codex 16차 추가: double-quoted $() pipe/bg bypass 2개.
-EXPECTED_FIXTURE_SIGNATURE = "1d7e5b917a35bc9b51953e58043ff59d1f4cfc808e720c44589296591183ba4e"
+# Codex 17차 추가: backtick dquote leak + ; / && chained unwrapped codex exec.
+EXPECTED_FIXTURE_SIGNATURE = "59d07606d53d7dde1d5910f426efb47e3f42697a75a72ed841dd6b5ceb9a245f"
 _sig_input = "\n".join(f"{d}|{c}|{e}" for d, c, e in FIXTURES)
 _actual_sig = hashlib.sha256(_sig_input.encode()).hexdigest()
 if _actual_sig != EXPECTED_FIXTURE_SIGNATURE:
@@ -866,6 +886,8 @@ REQUIRED_BYPASS_DESCS = {
     "wrapper pipe", "wrapper background",
     "subshell with inner pipe", "subshell inner pipe bg",
     "dquoted $() pipe bypass", "dquoted $() bg bypass",
+    "backtick dquote leak pipe",
+    "semicolon chained codex", "and-and chained codex",
 }
 REQUIRED_OK_DESCS = {
     "direct codex child", "direct gemini child",
