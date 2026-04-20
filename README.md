@@ -98,6 +98,11 @@ flowchart TB
   - 역할별로 3개 모델 자동 배분 (정밀=Claude, 구조=Codex, 탐색/문서=Gemini)
   - Phase 4-A-2에서 Codex·Gemini가 동시에 독립 검증 → 2/3 합의로 severity 확정
   - 불일치 시 `쟁점 항목(dispute)` 테이블에 명시
+- **`--ultra` 모드** ⭐ 최고 정밀도 — 각 역할을 Claude + Codex + Gemini **3중 복제** 병렬 + Phase 2.5 역할별 Opus 통합자
+  - 같은 역할을 3개 모델이 독립 분석 → Opus가 3/3·2/3·1/3 합의 판정 + 모순 감지
+  - Ultra consolidation schema: `status=failure`면 error required + minLength 1, ok면 error 금지 (stale text 누수 차단)
+  - 비용 3~4배 / 대형 팀은 ~15분. **프로덕션 릴리스 감사, 보안 감사, 중요 리팩터 검증**용
+  - `--cross`(분산)와 차이: ultra는 **복제** — 같은 역할에 3모델이 같이 달려듦
 - **교차 검증** — 반증 시도 + 독립 분석 + 대조 검증 3단계
 - **역검증 원칙** — Claude→Codex, Codex→Claude, Gemini→Claude 교차
 
