@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$comment": "team-agent 스킬 중앙 설정. 사용자 오버라이드는 refs/config.local.json (git-ignored).",
+  "version": 1,
+  "timeouts": {
+    "$comment": "초 단위. agent_soft = Phase 1 에이전트, verify = Phase 4-A-2 검증자, codemap = Phase 0.3",
+    "agent_soft_sec": 600,
+    "verify_sec": 300,
+    "codemap_sec": 60,
+    "grace_sec": 30
+  },
+  "limits": {
+    "$comment": "문자 단위",
+    "task_purpose_chars": 500,
+    "project_context_chars": 3000,
+    "role_filtered_context_chars": 1500,
+    "consolidator_input_chars": 10000,
+    "consolidator_truncate_to_chars": 8000,
+    "verify_target_cap": 10
+  },
+  "weights": {
+    "$comment": "에이전트 토큰 가중치. precise = 정밀 분석, structure = 구조 분석, docs = 문서/디자인, explore = 탐색/QA",
+    "precise": 1.5,
+    "structure": 1.0,
+    "docs": 0.7,
+    "explore": 0.5
+  },
+  "cost_overhead_k_tokens": {
+    "$comment": "K 토큰 단위. 각 백엔드가 추가로 소비하는 시스템 프롬프트+도구 정의",
+    "codex": 45,
+    "gemini": 20,
+    "opus_consolidator": 25,
+    "codemap": 8
+  },
+  "batch": {
+    "$comment": "Phase 1 Claude Agent 배치 크기. sleep_between_sec은 배치 간 대기",
+    "size_small": 3,
+    "size_large": 4,
+    "sleep_between_sec": 5
+  },
+  "circuit_breaker": {
+    "consecutive_failures_threshold": 3
+  },
+  "project_size_thresholds_bytes": {
+    "small_max": 524288,
+    "medium_max": 5242880
+  },
+  "base_tokens_k": {
+    "$comment": "기본 에이전트 토큰 (K). 가중치 ×로 역할별 조정",
+    "small": 15,
+    "medium": 30,
+    "large": 60
+  },
+  "base_scenarios_multipliers": {
+    "$comment": "3구간 비용 산정. 낙관/기대/비관",
+    "optimistic": 0.7,
+    "expected": 1.0,
+    "pessimistic": 1.5
+  },
+  "gemini": {
+    "$comment": "모델 alias 우선순위 배열. 실행 전 가용성 확인 후 첫 매치 사용 (I-5 아이디어)",
+    "candidates_agent": [
+      "gemini-3.1-flash-lite-preview",
+      "gemini-3.1-flash-lite",
+      "gemini-2.5-flash"
+    ],
+    "candidates_verifier": [
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro",
+      "gemini-2.5-pro"
+    ]
+  }
+}

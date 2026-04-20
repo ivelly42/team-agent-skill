@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 # Shared hard-timeout wrapper for external CLI backends (codex exec, gemini -p).
 #
+# CANONICAL SOURCE OF TRUTH. SKILL.md와 refs/{codex,gemini,cross}-verification.md의
+# `_run_with_timeout` 인라인 복사본은 이 파일과 byte-exact parity를 유지해야 한다.
+# tests/smoke.sh Test 9가 SHA256으로 pin하여 drift를 감지한다.
+#
+# 수정 절차:
+#   1. 이 파일(refs/timeout-wrapper.sh)을 먼저 수정
+#   2. SKILL.md 3곳 + refs/ 3곳의 인라인 블록을 이 파일과 동일하게 복붙
+#   3. tests/smoke.sh의 EXPECTED_CANONICAL_SHA256을 새 해시로 업데이트
+#   4. bash tests/smoke.sh로 Test 9·10 PASS 확인
+#
+# 향후 개선(계획): Phase 1 런타임에서 이 파일을 런타임에 source하도록 전환하면
+# 복붙 제거 가능. 현재는 "source 환경 불확실"을 이유로 self-contained 유지.
+# 전환 시 smoke Test 9를 "source 성공 + 함수 existence"로 재작성.
+#
 # Usage (sourced or inlined):
 #   source "${_SKILL_DIR}/refs/timeout-wrapper.sh"
 #   _run_with_timeout <secs> <grace> cmd [args...]

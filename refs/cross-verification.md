@@ -157,13 +157,22 @@ _CODEX_PID=$!
 
 # ───────────────────────────────────────────────────────────
 # 4. Gemini 검증자 (서브셸로 rc 캡처)
+# GEMINI_HAS_SCHEMA 분기 (CLI 버전에 따라 --json-schema 미지원)
 # ───────────────────────────────────────────────────────────
 (
-  _run_with_timeout 300 30 \
-    gemini -m gemini-3.1-pro-preview \
-      --json-schema "${_SKILL_DIR}/refs/cross-verification-schema.json" \
-      -p - < "/tmp/ta-${_RUN_ID}-gemini-verify-prompt.txt" \
-      > "$_GEMINI_OUT" 2> "$_GEMINI_LOG"
+  if [ "${GEMINI_HAS_SCHEMA:-0}" -gt 0 ]; then
+    _run_with_timeout 300 30 \
+      gemini -m gemini-3.1-pro-preview \
+        --json-schema "${_SKILL_DIR}/refs/cross-verification-schema.json" \
+        -p - < "/tmp/ta-${_RUN_ID}-gemini-verify-prompt.txt" \
+        > "$_GEMINI_OUT" 2> "$_GEMINI_LOG"
+  else
+    # --json-schema 미지원 — 프롬프트에 JSON 스키마 지시로 대체 (프롬프트 조립 시 포함되어야 함)
+    _run_with_timeout 300 30 \
+      gemini -m gemini-3.1-pro-preview \
+        -p - < "/tmp/ta-${_RUN_ID}-gemini-verify-prompt.txt" \
+        > "$_GEMINI_OUT" 2> "$_GEMINI_LOG"
+  fi
   echo $? > "$_GEMINI_RC_FILE"
 ) &
 _GEMINI_PID=$!
