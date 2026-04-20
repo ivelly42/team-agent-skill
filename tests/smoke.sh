@@ -128,37 +128,58 @@ PYEOF
 
 # ───────────────────────────────────────────────────────────
 # Test 6 (I10): META_ANALYSIS — TEAM_AGENT_META=true 환경변수 override
+#   + G-S1 가드: $HOME 하위만 허용, 외부 경로는 거부
 # ───────────────────────────────────────────────────────────
 test_meta_mode_env_override() {
-    local name="I10 — TEAM_AGENT_META=true override (비표준 경로)"
-    # 비표준 경로(예: /tmp/fork-team-agent)에서도 환경변수로 강제 활성화 가능해야 함
-    local tmp; tmp=$(mktemp -d)
-    local fake_dir="$tmp/random-name"
-    mkdir -p "$fake_dir/refs"
-    touch "$fake_dir/SKILL.md" "$fake_dir/refs/checklists.md"
+    local name="I10 — TEAM_AGENT_META=true override + G-S1 \$HOME whitelist"
+    # SKILL.md Step 2-10 감지 로직 재현. G-S1 whitelist 포함.
+    # $HOME 하위 fake dir ($HOME whitelist 통과 케이스)
+    local home_tmp; home_tmp=$(mktemp -d "$HOME/ta-smoke-XXXXXX")
+    local fake_in_home="$home_tmp/random-name"
+    mkdir -p "$fake_in_home/refs"
+    touch "$fake_in_home/SKILL.md" "$fake_in_home/refs/checklists.md"
 
-    # SKILL.md Step 2-10 감지 로직 재현
-    local META_ANALYSIS=false
-    local _META_REAL; _META_REAL=$(realpath "$fake_dir" 2>/dev/null || echo "")
-    if [ "${TEAM_AGENT_META:-}" = "true" ]; then
-        META_ANALYSIS=true
-    elif [[ "$_META_REAL" == */team-agent ]] && [ -f "$_META_REAL/SKILL.md" ] && [ -f "$_META_REAL/refs/checklists.md" ]; then
-        META_ANALYSIS=true
-    fi
+    # $HOME 밖 fake dir ($HOME whitelist 거부 케이스)
+    local outside_tmp; outside_tmp=$(mktemp -d "/tmp/ta-smoke-outside-XXXXXX")
+    local fake_outside="$outside_tmp/random-name"
+    mkdir -p "$fake_outside/refs"
+    touch "$fake_outside/SKILL.md" "$fake_outside/refs/checklists.md"
 
-    # 1) override 없이: 비표준 경로는 감지 안 됨
-    local baseline="$META_ANALYSIS"
+    # 공통 helper: SKILL.md Step 2-10 감지 로직 (G-S1 whitelist 포함)
+    _simulate_meta_detect() {
+        local fake_dir="$1"; local env_override="$2"
+        local META_ANALYSIS=false
+        local _META_REAL; _META_REAL=$(realpath "$fake_dir" 2>/dev/null || echo "")
+        local _HOME_REAL; _HOME_REAL=$(realpath "${HOME:-/}" 2>/dev/null || echo "")
+        if [ "$env_override" = "true" ]; then
+            local _META_UNDER_HOME=false
+            if [ -n "$_META_REAL" ] && [ -n "$_HOME_REAL" ]; then
+                case "$_META_REAL" in
+                    "$_HOME_REAL"|"$_HOME_REAL"/*) _META_UNDER_HOME=true ;;
+                esac
+            fi
+            if [ "$_META_UNDER_HOME" = "true" ]; then
+                META_ANALYSIS=true
+            fi
+        elif [[ "$_META_REAL" == */team-agent ]] && [ -f "$_META_REAL/SKILL.md" ] && [ -f "$_META_REAL/refs/checklists.md" ]; then
+            META_ANALYSIS=true
+        fi
+        echo "$META_ANALYSIS"
+    }
 
-    # 2) TEAM_AGENT_META=true로 강제: 감지돼야 함
-    META_ANALYSIS=false
-    if [ "true" = "true" ]; then META_ANALYSIS=true; fi  # 환경변수 분기 직접 시뮬
-    local overridden="$META_ANALYSIS"
+    # 케이스 A: override 없이, $HOME 안 fake dir → 감지 안 됨 (baseline false)
+    local case_a; case_a=$(_simulate_meta_detect "$fake_in_home" "")
+    # 케이스 B: override=true, $HOME 안 fake dir → 감지됨 (whitelist 통과)
+    local case_b; case_b=$(_simulate_meta_detect "$fake_in_home" "true")
+    # 케이스 C: override=true, $HOME 밖 fake dir → 거부됨 (G-S1 whitelist 차단)
+    local case_c; case_c=$(_simulate_meta_detect "$fake_outside" "true")
 
-    rm -rf "$tmp"
-    if [ "$baseline" = "false" ] && [ "$overridden" = "true" ]; then
+    rm -rf "$home_tmp" "$outside_tmp"
+
+    if [ "$case_a" = "false" ] && [ "$case_b" = "true" ] && [ "$case_c" = "false" ]; then
         _pass "$name"
     else
-        _fail "$name" "baseline=$baseline overridden=$overridden"
+        _fail "$name" "A=$case_a B=$case_b C=$case_c (expected A=false B=true C=false)"
     fi
 }
 
