@@ -4,6 +4,8 @@
 
 ### AI Agent Team Orchestrator for Claude Code
 
+[![Tests](https://img.shields.io/github/actions/workflow/status/ivelly42/team-agent-skill/tests.yml?branch=main&style=flat-square&label=tests&logo=github)](https://github.com/ivelly42/team-agent-skill/actions/workflows/tests.yml)
+[![Hardened](https://img.shields.io/badge/adversarial-22_rounds_Codex-EF4444?style=flat-square)](#-battle-tested)
 [![Roles](https://img.shields.io/badge/roles-42+-8B5CF6?style=flat-square)](#agent-roles-42)
 [![Checklists](https://img.shields.io/badge/checklists-335+_items-10B981?style=flat-square)](#agent-roles-42)
 [![Domains](https://img.shields.io/badge/domains-dev_·_game_·_quant_·_defi_·_ai_·_api-F59E0B?style=flat-square)](#domain-coverage)
@@ -116,6 +118,31 @@ flowchart TB
 | `update` | 스킬 최신 버전으로 업데이트 |
 
 > **`--cross` vs `--ultra`**: cross는 **분산**(역할별 서로 다른 모델) + 2/3 독립 검증. ultra는 **복제**(같은 역할을 3모델이 병렬) + 역할별 Opus 통합자가 3/3·2/3·1/3 합의와 모순 감지. 프로덕션 릴리스 감사처럼 최고 정밀도가 필요할 때 ultra, 비용 효율적 교차 검증이 필요할 때 cross.
+
+---
+
+## 🔬 Battle Tested
+
+다른 AI 도구들과 달리, 이 스킬은 **적대적 AI에게 부수려고 시도당한** 코드입니다.
+
+| 항목 | 수치 | 의미 |
+|------|------|------|
+| **Codex adversarial-review 라운드** | 22회 | GPT가 22번 "이거 뚫을 수 있나?" 검증 반복. 각 라운드 findings를 수정하거나 false positive로 증명 |
+| **실전 커밋** | 52개 | 각 라운드 findings 별로 atomic 커밋. false positive 발견 시 증거 커밋 + regression fixture 추가 |
+| **테스트 통과** | 16/16 | `tests/smoke.sh` 10/10 + `tests/schema-validation.sh` 6/6. GitHub Actions CI 자동 실행 |
+| **Adversarial fixtures** | 41개 | 알려진 bypass 패턴 전부 SHA256 signature pin. fixture 변경 시 상수도 함께 업데이트 강제 |
+| **Canonical parity hash** | `5c0c6d2c9e84...` | timeout-wrapper 인라인 복사본 7개 (SKILL.md 4곳 + refs 3종)가 byte-exact 일치. drift 발생 시 FAIL-fast |
+| **보안 가드** | $HOME whitelist | `TEAM_AGENT_META=true` override도 `$HOME` 하위 경로만 허용 (arbitrary-path injection 방지) |
+
+### 강화 패턴 예시
+
+- **`validate_wrapped()` shlex `posix=True`** — `_run_with_timeout 300 30 gemini "document -p behavior"` 같은 quoted `-p` bypass 시도를 정확히 탐지.
+- **Gemini backend contract** — `-p` flag 없이 호출하면 wrapper violation으로 판정 (stdin prompt 모드 없으면 watchdog timeout hang 유발).
+- **Schema Draft-07 `allOf+if/then`** — `status=failure`면 `error` 필드 required + `minLength:1`, `status=ok`면 `error` 금지. 실패 진단 정보 소실·stale text 누수 양쪽 차단.
+- **3-tier timeout wrapper** — `GNU timeout` → `gtimeout` → Python watchdog. 무한 대기 없음, deterministic rc (124 timeout / 137 SIGKILL / 127 not-found).
+- **Secret scrubbing** — 에이전트 출력에서 `password`/`secret`/`api.key`/`token` 패턴 자동 redaction.
+
+> 이 과정의 상세는 [CHANGELOG.md의 Adversarial Hardening 섹션](CHANGELOG.md#-adversarial-hardening-22-round-codex-verify-fix-loop) 참조.
 
 ---
 

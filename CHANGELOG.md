@@ -2,7 +2,33 @@
 
 team-agent 스킬의 주요 변경 이력. [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식, [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — 2026-04-19 Ultra 품질 분석 후속 패치
+## [Unreleased] — 2026-04-20 환경독립 + 보안 하드닝
+
+### 🛡️ Security
+- **G-S1 TEAM_AGENT_META $HOME whitelist** — `TEAM_AGENT_META=true` override 사용 시 realpath 해소 후 `$HOME` 하위 경로만 허용. `/etc`, `/tmp/malicious`, `/root/...` 같은 임의 경로를 스킬 로직에 편입하려던 injection 경로 차단. 2026-04-19 Ultra 분석 Gemini 단독 finding(1/2 unique). smoke.sh I10을 3-case 검증(baseline/in-home/outside)으로 확장.
+
+### 🟠 Fixed (High)
+- **Bug #2 Gemini refs 환경독립 추상화** — `refs/gemini-agent-template.md`·`refs/codemap-generator.md`의 Gemini 섹션이 `find`/`grep`/`cat`/`head`/`sed` POSIX 셸 명령을 직접 지시하던 문제. gstack-augmented Gemini CLI(`grep_search`/`read_file`만 보유)에서 의미적 오지시. outcome 기반 추상화로 전환 — 도구명 대신 목표(구조 파악/정독/패턴 검색/LOC 계산) 명시, 도구 선택은 에이전트에 위임. 표준 Gemini CLI / gstack-augmented / 기타 환경 모두 동일 프롬프트로 동작.
+
+### 🔬 Adversarial Hardening (22-round Codex verify-fix loop)
+4~24차까지 Codex adversarial-review 22라운드 + 52커밋으로 다음 보안·정확성 개선:
+- `validate_wrapped()` shlex `posix=True` 기반 재작성 — quoted `-p` bypass 차단 (`gemini "document -p behavior"` 같은 탈출 패턴).
+- Gemini backend child contract 강화: `-p` flag 필수 검증 (stdin prompt 모드 강제, watchdog timeout hang 방지).
+- ultra-consolidation-schema Draft-07 `allOf+if/then`: failure status면 `error` 필드 required + `minLength:1`, ok status면 `error` 금지.
+- canonical timeout-wrapper hash `5c0c6d2c9e84` 고정 — SKILL.md 4곳 + refs 3종 총 7 inline copy가 byte-exact parity. SHA256 mismatch → FAIL-fast.
+- 41개 adversarial fixture + `EXPECTED_FIXTURE_SIGNATURE` SHA256 pin. fixture 의도적 변경 시 상수도 함께 업데이트 강제.
+- 3-tier timeout wrapper(`GNU timeout` → `gtimeout` → Python watchdog): fail-closed, 무한 대기 없음, deterministic rc (124 timeout / 137 SIGKILL / 127 not-found).
+
+24차 Codex finding은 `posix=False` 결과 오인으로 밝혀진 false positive. 실측(`posix=True`)으로 반박 후 regression fixture를 명시 추가해 방어 증명.
+
+### ✅ Verified
+- `tests/smoke.sh`: **10/10 PASS**
+- `tests/schema-validation.sh`: **6/6 PASS**
+- canonical wrapper parity + 41 fixture signature pin + JSON schema Draft-07 조건부 required
+
+---
+
+## [2026-04-19 Ultra 품질 분석 후속 패치] — 이전 패치 계속
 
 ### 🔴 Fixed (Critical)
 - **C1**: `gemini-3.1-flash-lite` → `gemini-3.1-flash-lite-preview` 6곳 수정 (SKILL.md line 1063/1066/1156/1245/1248/1254). 실제 Gemini API가 `-preview` 없는 alias를 404로 거부함을 실측 확인. 이 버그로 `--ultra`/`--gemini`/`--cross` 모드의 Gemini 경로 전체가 작동 불능 상태였음.
