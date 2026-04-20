@@ -55,13 +55,19 @@ Glob/Read/Grep 도구를 사용한다.
 ### Gemini -p 백엔드용
 
 ```
-## 탐색 지시 (셸 명령, 1M 컨텍스트 활용)
-1. 구조 파악: `find . -maxdepth 4 -type f ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/vendor/*" ! -path "*/dist/*" ! -path "*/.next/*" ! -path "*/target/*" ! -path "*/__pycache__/*" | head -500`
-2. 1M 컨텍스트를 활용해 핵심 파일은 `cat` 전체를 읽어라. 대용량 바이너리는 `file <파일>`로 타입 확인 후 텍스트만 읽어라.
-3. import 수집: `grep -rn "^import \|^from \|^const .* = require(\|^import {\|^use \|^require " --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=vendor --exclude-dir=dist` (Go 블록 임포트는 `grep -rn -A 20 "^import (" --include="*.go"`로 별도 수집)
-4. LOC: `find ... -exec wc -l {} +`
-5. 추측 금지. 실제 읽은 파일만 포함하라.
+## 탐색 지시 (1M 컨텍스트 활용, 환경독립)
+
+네 환경에서 사용 가능한 파일 탐색·읽기 도구로 다음을 수행하라.
+도구 이름은 환경마다 다르다 (표준 Gemini CLI의 shell 명령, gstack-augmented 환경의 `grep_search`/`read_file`, 기타). 가진 도구 목록을 먼저 확인한 뒤 아래 **목표**를 달성하라.
+
+1. **구조 파악**: 루트에서 깊이 4까지 파일을 최대 500개 열거. 제외: `node_modules`, `.git`, `vendor`, `dist`, `.next`, `target`, `__pycache__`.
+2. **핵심 파일 정독**: 1M 토큰 컨텍스트를 활용해 주요 파일은 **전체 본문을 읽어라**. 대용량 파일은 범위 읽기. 바이너리는 타입 확인 후 텍스트만.
+3. **import 수집**: 소스 파일(`.ts`/`.tsx`/`.py`/`.js`/`.go` 등)에서 `import`·`from`·`const ... = require(`·`require` 선언을 재귀 검색. 제외 디렉토리는 위 1번과 동일. Go 블록 임포트(`import ( ... )` 멀티라인)는 별도 패턴으로 수집(블록 시작 후 최대 20줄).
+4. **LOC 계산**: 열거한 파일의 줄 수 계산. 배치로 처리해 도구 호출 수 최소화.
+5. **추측 금지**. 실제 읽은 파일만 포함하라.
 ```
+
+위 섹션은 특정 셸 명령(`find`/`cat`/`grep`/`wc` 등)을 고정 지시하지 않는다. gstack-augmented Gemini CLI처럼 `run_shell_command`가 없는 환경에서 오탐을 일으키기 때문이다. 표준 환경에서는 에이전트가 shell 도구로, 제한 환경에서는 `grep_search`/`read_file`로 동일 목표를 달성한다.
 
 ## 역할별 필터 힌트 (에이전트 프롬프트 주입 시 함께 포함)
 

@@ -1,14 +1,18 @@
 # Gemini 에이전트 프롬프트 탐색 지시
 
 gemini -p 백엔드 에이전트는 Claude의 Glob/Read/Grep 도구가 없다.
-대신 셸 명령으로 파일을 탐색한다. 에이전트 프롬프트의 `## 탐색 지시` 섹션을 아래로 대체:
+대신 **자신에게 주어진 파일 탐색·읽기 도구**(표준 Gemini CLI의 shell 도구, 또는 gstack-augmented 환경의 `grep_search`/`read_file` 등)를 사용한다. 환경마다 도구명이 달라 셸 명령을 고정 지시하면 오히려 오탐 경로가 된다. 에이전트 프롬프트의 `## 탐색 지시` 섹션은 아래 환경독립 형태로 대체:
 
 ```
 ## 탐색 지시 (필수 — 분석 전에 반드시 실행)
-1. `find . -maxdepth 4 -type f -name "*.EXT" ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/vendor/*" ! -path "*/dist/*" ! -path "*/.next/*" ! -path "*/target/*" ! -path "*/__pycache__/*" | head -100` 로 프로젝트 구조를 파악하라
-2. 1M 토큰 컨텍스트를 가진다. 핵심 파일은 `cat <파일>`로 전체 읽어도 좋다. 대용량 바이너리는 `file <파일>`로 확인.
-3. `grep -rn "패턴" --include="*.ts" --include="*.py" --include="*.js" --include="*.go" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=vendor --exclude-dir=dist` 로 담당 영역 관련 핵심 소스를 탐색하라
-4. 탐색 결과 기반으로 분석 범위를 결정하라
+
+네 환경에서 사용 가능한 파일 탐색·읽기 도구로 다음을 수행하라.
+도구 이름은 환경마다 다르다 (shell 명령, `grep_search`, `read_file` 등). 네가 가진 도구 목록을 먼저 확인하고 아래 목표를 달성하라.
+
+1. **프로젝트 구조 파악**: 루트에서 깊이 4까지 `*.EXT` 확장자 파일을 최대 100개 열거. `node_modules`, `.git`, `vendor`, `dist`, `.next`, `target`, `__pycache__` 경로는 제외.
+2. **핵심 파일 정독**: 1M 토큰 컨텍스트를 활용해 담당 영역 핵심 파일은 **전체 본문을 읽어라**. 대용량 파일은 범위를 나눠 읽어도 된다. 바이너리 파일은 건너뛴다.
+3. **패턴 검색**: 역할별 키워드(`패턴`)를 `*.ts`/`*.tsx`/`*.py`/`*.js`/`*.go` 등 주요 소스 파일에서 재귀 검색. 제외 디렉토리는 위 1번과 동일.
+4. **분석 범위 확정**: 탐색 결과 기반으로 보고 대상 범위를 결정하라.
 
 추측 없이 항상 원문 근거를 인용하라. 직접 읽은 코드만 보고하라.
 ```
@@ -16,9 +20,9 @@ gemini -p 백엔드 에이전트는 Claude의 Glob/Read/Grep 도구가 없다.
 ## 추가 주의사항
 
 - gemini CLI는 `-s read-only` 같은 샌드박스 옵션이 없다. 파일 수정은 프롬프트 지시로 금지("절대 파일을 수정·생성하지 말라")
-- `ls -R` 사용 금지 — node_modules 등으로 출력 폭발
-- 대용량 파일은 `head -200 <파일>`, 범위 읽기는 `sed -n '10,80p' <파일>`
-- 바이너리 파일은 `file <파일>`로 타입 확인 후 텍스트만 읽기
+- 디렉토리 전체 재귀 열거(예: `ls -R` 또는 동급 도구) 금지 — `node_modules` 등으로 출력 폭발
+- 대용량 파일은 범위 읽기(라인 단위 슬라이싱) 활용. 도구명은 환경에 맞춰 선택.
+- 바이너리 파일은 타입 확인 후 텍스트만 읽기
 
 ## Gemini 강점 활용
 
@@ -34,3 +38,9 @@ gemini -p 백엔드 에이전트는 Claude의 Glob/Read/Grep 도구가 없다.
 | `패턴` | 역할의 핵심 키워드 (refs/checklists.md 참조) | 보안 → `password\|secret\|api.key\|token` |
 
 LLM은 에이전트 역할과 PROJECT_CONTEXT의 스택 정보를 기반으로 구체적 값을 삽입한다.
+
+## 환경독립 원칙 (2026-04-20 업데이트)
+
+이 파일은 원래 `find`/`grep`/`cat` 같은 POSIX 셸 명령을 직접 지시했다. 그러나 gstack-augmented Gemini CLI 등 일부 환경은 `run_shell_command`가 없고 `grep_search`/`read_file`/`cli_help`만 존재한다. 그 환경에서 셸 명령 지시는 "도구 없음" 오류로 이어지거나(Gemini가 자체 추론으로 우회하긴 하지만) 의미적으로 틀린 지시가 된다.
+
+해결: 도구명 대신 **목표(outcome)**를 명시하고 도구 선택은 에이전트에게 위임. 표준 Gemini CLI(shell) / gstack-augmented(grep_search·read_file) / 기타 환경 모두 정확히 동작한다.
