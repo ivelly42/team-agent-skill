@@ -106,8 +106,11 @@ except subprocess.TimeoutExpired:
 _PROMPT="/tmp/ta-${_RUN_ID}-gemini-verify.txt"
 _OUTPUT=$(mktemp "/tmp/ta-${_RUN_ID}-gemini-verify-output.XXXXXX")
 
-_run_with_timeout 300 30 \
-  gemini -m gemini-3.1-pro-preview -p - < "$_PROMPT" > "$_OUTPUT" 2>/dev/null
+# timeout·grace·모델 모두 Preamble 0.1에서 바인딩된 fail-closed _CFG_* 사용.
+# 모델 해석: _pick_gemini_model verifier → candidates_verifier 배열에서 가용 첫 후보.
+_GEMINI_VERIFIER_MODEL="$(_pick_gemini_model verifier)"
+_run_with_timeout "$_CFG_VERIFY_SEC" "$_CFG_GRACE_SEC" \
+  gemini -m "$_GEMINI_VERIFIER_MODEL" -p - < "$_PROMPT" > "$_OUTPUT" 2>/dev/null
 _GEMINI_RC=$?
 
 # 검증 3단: rc / output 비어있지 않음 / 타임아웃 아님

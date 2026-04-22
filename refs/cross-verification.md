@@ -144,7 +144,8 @@ _START_TS=$(date +%s)
 # 3. Codex 검증자 (서브셸로 rc 캡처)
 # ───────────────────────────────────────────────────────────
 (
-  _run_with_timeout 300 30 \
+  # timeout·grace는 Preamble 0.1에서 바인딩된 fail-closed _CFG_* 사용 (폴백 문법 금지).
+  _run_with_timeout "$_CFG_VERIFY_SEC" "$_CFG_GRACE_SEC" \
     codex exec - -s read-only -C "$_EXEC_DIR" \
       --output-schema "${_SKILL_DIR}/refs/cross-verification-schema.json" \
       -o "$_CODEX_OUT" \
@@ -158,18 +159,20 @@ _CODEX_PID=$!
 # ───────────────────────────────────────────────────────────
 # 4. Gemini 검증자 (서브셸로 rc 캡처)
 # GEMINI_HAS_SCHEMA 분기 (CLI 버전에 따라 --json-schema 미지원)
+# 모델: _pick_gemini_model verifier → refs/config.json candidates_verifier 우선순위 배열.
 # ───────────────────────────────────────────────────────────
+_GEMINI_VERIFIER_MODEL="$(_pick_gemini_model verifier)"
 (
   if [ "${GEMINI_HAS_SCHEMA:-0}" -gt 0 ]; then
-    _run_with_timeout 300 30 \
-      gemini -m gemini-3.1-pro-preview \
+    _run_with_timeout "$_CFG_VERIFY_SEC" "$_CFG_GRACE_SEC" \
+      gemini -m "$_GEMINI_VERIFIER_MODEL" \
         --json-schema "${_SKILL_DIR}/refs/cross-verification-schema.json" \
         -p - < "/tmp/ta-${_RUN_ID}-gemini-verify-prompt.txt" \
         > "$_GEMINI_OUT" 2> "$_GEMINI_LOG"
   else
     # --json-schema 미지원 — 프롬프트에 JSON 스키마 지시로 대체 (프롬프트 조립 시 포함되어야 함)
-    _run_with_timeout 300 30 \
-      gemini -m gemini-3.1-pro-preview \
+    _run_with_timeout "$_CFG_VERIFY_SEC" "$_CFG_GRACE_SEC" \
+      gemini -m "$_GEMINI_VERIFIER_MODEL" \
         -p - < "/tmp/ta-${_RUN_ID}-gemini-verify-prompt.txt" \
         > "$_GEMINI_OUT" 2> "$_GEMINI_LOG"
   fi

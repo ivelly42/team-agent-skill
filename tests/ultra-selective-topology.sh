@@ -35,11 +35,15 @@ else
     fail "U2 — Ultra 실행 섹션 strategy 참조 부족 ($CNT)"
 fi
 
-# U3. 가중치 기반 복제 테이블 (3중/2중/1중)
-if grep -qE "×1\.5.*3중" "$SKILL_MD" && grep -qE "×1\.0.*2중" "$SKILL_MD" && grep -qE "(×0\.7|≤×0\.7).*1중" "$SKILL_MD"; then
-    pass "U3 — 가중치별 복제 수 테이블 (×1.5=3중, ×1.0=2중, ≤×0.7=1중)"
+# U3. 가중치 기반 복제 테이블 — Codex round-3 #3: ≤×0.7도 2중 강제
+# Ultra 모드 실행 섹션 안에서 "×1.5 3중", "×1.0 2중", "×0.7 2중" 또는 "2-replica baseline"이 모두 있어야 함
+if grep -qE "×1\.5.*3중" "$SKILL_MD" \
+  && grep -qE "×1\.0.*2중" "$SKILL_MD" \
+  && grep -qE "2-replica baseline" "$SKILL_MD" \
+  && grep -qE "(×0\.7|≤×0\.7|문서·탐색).*2중" "$SKILL_MD"; then
+    pass "U3 — 가중치별 복제 수 테이블 (×1.5=3중, ×1.0/≤×0.7=2중, baseline 명시)"
 else
-    fail "U3 — 가중치별 복제 테이블 불완전"
+    fail "U3 — 가중치별 복제 테이블 불완전 또는 2-replica baseline 문구 누락"
 fi
 
 # U4. Phase 0 manifest 생성 시 ultra_strategy 포함
@@ -56,11 +60,11 @@ else
     fail "U5 — schema 버전 bump 누락"
 fi
 
-# U6. Phase 2.5에서 selective 1중 패스스루 언급
-if grep -qE "selective 1중.*패스스루|단일 결과.*consensus_findings|agreement.*1/1" "$SKILL_MD"; then
-    pass "U6 — Phase 2.5 selective 1중 패스스루 규칙"
+# U6. Phase 2.5 1중 패스스루 (이제 예외 경로이지만 안전망으로 유지)
+if grep -qE "1중.*패스스루|단일 결과.*consensus_findings|agreement.*1/1" "$SKILL_MD"; then
+    pass "U6 — Phase 2.5 1중 패스스루 안전망 규칙 (예외 경로)"
 else
-    fail "U6 — selective 1중 역할 통합자 생략 규칙 미명시"
+    fail "U6 — 1중 역할 통합자 생략 규칙 미명시"
 fi
 
 # U7. 비용 배지에 strategy 포함
@@ -70,40 +74,109 @@ else
     fail "U7 — 비용 표시에 strategy 구분 없음"
 fi
 
-# U8. 실제 로직 검증: Python으로 ultra_replication 시뮬레이션
+# U8. Python 시뮬레이션 — Codex round-3 #3 이후 2-replica baseline
 python3 <<'PYEOF'
-def ultra_replication(role_weight, strategy):
+def ultra_replication(role_weight, strategy, codex_avail=True, gemini_avail=True):
+    """SKILL.md 의사코드 그대로 (2-replica baseline)."""
     if strategy == "full":
-        return ["claude", "codex", "gemini"]
-    if role_weight >= 1.5:
-        return ["claude", "codex", "gemini"]
-    if role_weight >= 1.0:
-        return ["claude", "codex"]
-    return ["claude"]
+        want = ["claude", "codex", "gemini"]
+    elif role_weight >= 1.5:
+        want = ["claude", "codex", "gemini"]
+    elif role_weight >= 1.0:
+        want = ["claude", "codex"]
+    else:
+        want = ["claude", "codex"]  # ≤×0.7도 2중 강제
+    out = [b for b in want if b == "claude"
+           or (b == "codex" and codex_avail)
+           or (b == "gemini" and gemini_avail)]
+    if len(out) < 2 and gemini_avail and "gemini" not in out:
+        out.append("gemini")
+    return out
 
 # Full 모드 — 전원 3중
 assert ultra_replication(0.5, "full") == ["claude", "codex", "gemini"], "full×0.5"
 assert ultra_replication(1.5, "full") == ["claude", "codex", "gemini"], "full×1.5"
 
-# Selective 모드
+# Selective 2-replica baseline
 assert ultra_replication(1.5, "selective") == ["claude", "codex", "gemini"], "sel×1.5=3중"
 assert ultra_replication(1.0, "selective") == ["claude", "codex"], "sel×1.0=2중"
-assert ultra_replication(0.7, "selective") == ["claude"], "sel×0.7=1중"
-assert ultra_replication(0.5, "selective") == ["claude"], "sel×0.5=1중"
+assert ultra_replication(0.7, "selective") == ["claude", "codex"], "sel×0.7=2중 (baseline)"
+assert ultra_replication(0.5, "selective") == ["claude", "codex"], "sel×0.5=2중 (baseline)"
 
-# 5역할 시나리오 (×1.5 1 + ×1.0 2 + ×0.7 2)
+# 가용성 필터
+# Codex 미설치 → Gemini로 보강 (×0.7 이하도 2중 보장)
+assert ultra_replication(0.7, "selective", codex_avail=False, gemini_avail=True) == ["claude", "gemini"], \
+    "codex 없으면 gemini fallback"
+# 양쪽 미설치 → Claude 단독 (호출측이 ULTRA_MODE=false 다운그레이드 판단)
+assert ultra_replication(0.7, "selective", codex_avail=False, gemini_avail=False) == ["claude"], \
+    "양쪽 미설치 → 1중 (다운그레이드 신호)"
+# Gemini 미설치, Codex 있음 → ×1.5 역할만 3중→2중
+assert ultra_replication(1.5, "selective", codex_avail=True, gemini_avail=False) == ["claude", "codex"], \
+    "gemini 미설치 시 ×1.5는 2중으로"
+
+# 5역할 시나리오 재계산
 scenarios = [1.5, 1.0, 1.0, 0.7, 0.5]
 full_total = sum(len(ultra_replication(w, "full")) for w in scenarios)
 sel_total = sum(len(ultra_replication(w, "selective")) for w in scenarios)
-# full: 5*3=15, selective: 3+2+2+1+1=9 → ~40% 절감
+# full: 5*3=15, selective 2-replica baseline: 3+2+2+2+2=11 → ~27% 감소
 assert full_total == 15, f"full 15 expected, got {full_total}"
-assert sel_total == 9, f"selective 9 expected, got {sel_total}"
+assert sel_total == 11, f"selective(2-replica) 11 expected, got {sel_total}"
+
+# 독립 검증 보장: 모든 역할 최소 2중
+for w in scenarios:
+    r = ultra_replication(w, "selective")
+    assert len(r) >= 2, f"selective w={w} should have ≥2 replicas, got {r}"
+
 print(f"U8_OK: full={full_total} selective={sel_total} savings={(full_total-sel_total)/full_total*100:.0f}%")
 PYEOF
 if [ "$?" -eq 0 ]; then
-    pass "U8 — Python 시뮬레이션: selective가 full 대비 40% 감소 (15→9)"
+    pass "U8 — Python 시뮬레이션: 2-replica baseline + fallback (full 15 / selective 11, ~27% 감소)"
 else
     fail "U8 — 복제 로직 시뮬레이션 실패"
+fi
+
+# U9. Python 시뮬레이션: ultra_replicas_for_cost도 동일 규칙 (단일 진실원)
+python3 <<'PYEOF'
+def ultra_replicas_for_cost(role_weight, strategy, codex_avail=True, gemini_avail=True):
+    if strategy == "full":
+        want = ["claude", "codex", "gemini"]
+    elif role_weight >= 1.5:
+        want = ["claude", "codex", "gemini"]
+    elif role_weight >= 1.0:
+        want = ["claude", "codex"]
+    else:
+        want = ["claude", "codex"]  # Codex round-3 #3
+    out = [b for b in want if b == "claude"
+           or (b == "codex" and codex_avail)
+           or (b == "gemini" and gemini_avail)]
+    if len(out) < 2 and gemini_avail and "gemini" not in out:
+        out.append("gemini")
+    return out
+
+# Phase 0.5 비용 함수는 Phase 1 spawn과 동일 결과여야 함
+assert ultra_replicas_for_cost(0.7, "selective") == ["claude", "codex"], "cost ×0.7=2중"
+assert ultra_replicas_for_cost(1.5, "selective") == ["claude", "codex", "gemini"], "cost ×1.5=3중"
+assert ultra_replicas_for_cost(0.7, "selective", codex_avail=False) == ["claude", "gemini"], "cost codex 없으면 gemini"
+print("U9_OK: ultra_replicas_for_cost 규칙이 ultra_replication과 일치")
+PYEOF
+if [ "$?" -eq 0 ]; then
+    pass "U9 — Phase 0.5 비용 함수가 Phase 1 spawn과 동일 규칙 (단일 진실원)"
+else
+    fail "U9 — 비용 함수와 spawn 함수 규칙 drift"
+fi
+
+# U10. SKILL.md 실제 소스에 fail-safe 분기 존재 (가용성 부족 → gemini 보강)
+if grep -qE "gemini_avail\s+and\s+\"gemini\"\s+not\s+in\s+out" "$SKILL_MD"; then
+    pass "U10 — ultra_replication fail-safe: Codex 미설치 시 Gemini로 2중 복구"
+else
+    fail "U10 — fail-safe 분기 미정의 (len(out) < 2 보강 로직 누락)"
+fi
+
+# U11. 양쪽 미설치 시 ULTRA_MODE=false 다운그레이드 경고 문구
+if grep -qE "Ultra 모드 취소|ULTRA_MODE.*false|Claude 단일 팀 \+ Phase 4-A-2" "$SKILL_MD"; then
+    pass "U11 — 양쪽 미설치 fail-closed: ULTRA_MODE 다운그레이드 + Phase 4-A-2 정규 검증"
+else
+    fail "U11 — 양쪽 미설치 다운그레이드 경로 미명시"
 fi
 
 echo ""
