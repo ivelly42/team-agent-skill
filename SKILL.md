@@ -370,7 +370,10 @@ raw = unicodedata.normalize('NFC', raw)
 raw = re.sub(r'[^a-zA-Z0-9\s\-_.,:()!\'\"?가-힣]', '', raw)
 # JSON-safe 보장: Write 도구 → json.dumps() 경로에서 자동 이스케이프되므로
 # 여기서는 길이 제한만 적용. 큰따옴표/백슬래시는 json.dumps()가 처리.
-print(raw[:500], end='')
+# 길이는 Preamble 0.1에서 export된 _CFG_TASK_PURPOSE_CHARS 사용 (기본 500).
+import os
+_MAX_LEN = int(os.environ.get("_CFG_TASK_PURPOSE_CHARS", "500"))
+print(raw[:_MAX_LEN], end='')
 PYEOF
 )
 rm -f "/tmp/ta-RUN_ID_VALUE-input.txt"
@@ -1400,7 +1403,7 @@ except subprocess.TimeoutExpired:
 _SCHEMA="${_SKILL_DIR}/refs/codemap-schema.json"
 _EXEC_DIR="${SCOPE_PATH:-$_PROJECT_DIR}"
 
-_run_with_timeout 60 10 \
+_run_with_timeout "${_CFG_CODEMAP_SEC:-60}" 10 \
   codex exec - -s read-only -C "$_EXEC_DIR" \
     --output-schema "$_SCHEMA" -o "$_CODEMAP" \
     --skip-git-repo-check < "/tmp/ta-${_RUN_ID}-codemap-prompt.txt"
@@ -1459,13 +1462,14 @@ _SCHEMA="${_SKILL_DIR}/refs/codemap-schema.json"
 _CODEMAP_STDERR="/tmp/ta-${_RUN_ID}-codemap-stderr.log"
 : > "$_CODEMAP_STDERR" && chmod 600 "$_CODEMAP_STDERR"
 
+_GEMINI_AGENT_MODEL="$(_pick_gemini_model agent)"
 if [ "$GEMINI_HAS_SCHEMA" -gt 0 ]; then
-  _run_with_timeout 60 10 \
-    gemini -m gemini-3.1-flash-lite-preview --json-schema "$_SCHEMA" \
+  _run_with_timeout "${_CFG_CODEMAP_SEC:-60}" 10 \
+    gemini -m "$_GEMINI_AGENT_MODEL" --json-schema "$_SCHEMA" \
       -p - < "/tmp/ta-${_RUN_ID}-codemap-prompt.txt" > "$_CODEMAP" 2>"$_CODEMAP_STDERR"
 else
-  _run_with_timeout 60 10 \
-    gemini -m gemini-3.1-flash-lite-preview \
+  _run_with_timeout "${_CFG_CODEMAP_SEC:-60}" 10 \
+    gemini -m "$_GEMINI_AGENT_MODEL" \
       -p - < "/tmp/ta-${_RUN_ID}-codemap-prompt.txt" > "$_CODEMAP" 2>"$_CODEMAP_STDERR"
 fi
 _CODEMAP_RC=$?
@@ -1566,29 +1570,61 @@ DEEP_MODE 추가: +15K. Codex 검증 추가: +20K (조건 충족 시에만 — C
 **--cross 모드 검증 비용 (Phase 4-A-2)**: Codex ~15K + Gemini ~15K = ~30K (검증 대상 finding 수에 비례).
 
 **--ultra 모드 비용 보정** (`ULTRA_MODE=true` 시):
-- 역할당 에이전트 수: 기본 3 (Claude + Codex + Gemini), 다운그레이드 시 2
-- 역할당 총 토큰 = (기본 × 가중치) + (기본 × 가중치 + 45K Codex 오버헤드) + (기본 × 가중치 + 20K Gemini 오버헤드)
-- 역할별 Opus 통합자 (Phase 2.5): 역할당 +25K (3개 결과 요약 + 합의 계산)
-- 총합 ≈ cross 대비 3~4배
-- 예: 5역할, 중규모(30K 기본, 평균 가중치 1.0) → 5 × (30K + 75K + 50K) + 5 × 25K = 900K (cross는 ~180K)
 
-- 비용 표시 시 `[Claude]` / `[Codex]` / `[Gemini]` / `[Opus-통합]` 태그와 함께 에이전트별 예상 달러를 병기한다
-- `--cross` 모드에서는 채팅 출력 상단에 `💰 Cross Mode: 예상 $N.NN` 배지 표시. 기대값 대비 1.5배 초과 시 경고.
-- `--ultra` 모드에서는 `💰 Ultra Mode: 예상 $N.NN (Claude/Codex/Gemini 3중 + Opus 통합 × {역할수})` 배지 표시. 기대값 대비 1.5배 초과 시 강력 경고 (규모 축소 제안).
+Phase 1 spawn 경로(`ultra_replication`, `SKILL.md:Ultra 모드 실행` 섹션)와 **동일한 단일 진실원**을 써서 역할별 복제 수를 결정한다. 승인 게이트·비용 배지·토큰 추정이 모두 이 결과에서 파생된다.
+
+```python
+# Phase 0.5 비용 계산 의사함수 — Phase 1의 ultra_replication과 동일 규칙
+def ultra_replicas_for_cost(role_weight: float, strategy: str,
+                            codex_avail: bool, gemini_avail: bool) -> list[str]:
+    # strategy: "full" | "selective" (ULTRA_STRATEGY 값)
+    if strategy == "full":
+        want = ["claude", "codex", "gemini"]
+    elif role_weight >= 1.5:
+        want = ["claude", "codex", "gemini"]
+    elif role_weight >= 1.0:
+        want = ["claude", "codex"]
+    else:
+        want = ["claude"]
+    # 다운그레이드: CLI 미설치 반영 (full에도 적용)
+    out = [b for b in want if b == "claude"
+           or (b == "codex" and codex_avail)
+           or (b == "gemini" and gemini_avail)]
+    return out or ["claude"]  # 최소 claude 1명 보장
+```
+
+**역할별 토큰 공식** (선별 복제 반영):
+- 각 역할마다 `replicas = ultra_replicas_for_cost(weight, ULTRA_STRATEGY, ULTRA_CODEX_AVAIL, ULTRA_GEMINI_AVAIL)` 계산
+- 역할당 토큰 = `sum(base × weight + overhead[backend])` for backend in replicas
+  - overhead: `_CFG_OVERHEAD_CODEX`(기본 45K) · `_CFG_OVERHEAD_GEMINI`(기본 20K) · claude=0
+- Phase 2.5 Opus 통합자 추가: 복제 수 ≥ 2인 역할만 `_CFG_OVERHEAD_OPUS`(기본 25K). **1중 역할은 통합자 생략** (`agreement:"1/1"` 패스스루).
+
+**예시 (5역할, 중규모 base=30K, 가중치 ×1.5 1개 + ×1.0 2개 + ×0.7 2개, 전 CLI 가용)**:
+- `full` → 모든 역할 3중. 5 × (30×w + 75K + 50K) + 5 × 25K ≈ **900K**
+- `selective` → 역할 수: 3중 1 + 2중 2 + 1중 2. 토큰 합산: (45+75+50) + 2×(30+75) + 2×(21) = 170 + 210 + 42 = **~500K** (full 대비 **44% 절감**)
+
+**비용 배지** (채팅 출력 상단):
+- `--cross`: `💰 Cross Mode: 예상 $N.NN`
+- `--ultra=full`: `💰 Ultra Mode [full]: 예상 $N.NN (Claude/Codex/Gemini 3중 × {역할수} + Opus 통합)`
+- `--ultra=selective`: `💰 Ultra Mode [selective]: 예상 $N.NN ({3중 N} + {2중 N} + {1중 N} — full 대비 ~XX% 절감)`
+- 기대값 대비 1.5배 초과 시 경고. 배지마다 `[Claude]` / `[Codex]` / `[Gemini]` / `[Opus-통합]` 세분화 달러 병기.
 
 비용 추정을 에이전트별로 3구간(낙관/기대/비관)으로 표시한다:
 ```
 예상 토큰: 총 ~NNK (낙관 ~NK / 기대 ~NK / 비관 ~NK)
   에이전트 [backend]: ~NK (역할 x가중치)
   ...
-  Codex 오버헤드: +45K/에이전트 (시스템 프롬프트+도구 정의)
+  Codex 오버헤드: +{_CFG_OVERHEAD_CODEX}K/에이전트 (시스템 프롬프트+도구 정의)
 ```
 
-**3구간 산정**: 낙관 = 기본 x 가중치 x 0.7, 기대 = 기본 x 가중치, 비관 = 기본 x 가중치 x 1.5. Codex 에이전트는 기대값에 +45K 오버헤드를 추가.
+**3구간 산정**: 낙관 = 기본 x 가중치 x 0.7, 기대 = 기본 x 가중치, 비관 = 기본 x 가중치 x 1.5. Codex 에이전트는 기대값에 `_CFG_OVERHEAD_CODEX` 오버헤드를 추가.
 
-**승인**: AUTO_MODE + 5명 이하 + 소/중규모 → 자동. 6명+ 또는 대규모 → AskUserQuestion(진행/줄이기/취소). 그 외 → 표시만 하고 진행. manifest에 cost_estimate 기록.
+**승인 게이트 (전략별 차등)**:
+- 일반(non-Ultra): AUTO_MODE + 5명 이하 + 소/중규모 → 자동. 6명+ 또는 대규모 → AskUserQuestion(진행/줄이기/취소). 그 외 → 표시만 하고 진행.
+- `--ultra=full`: 자동 승인을 **4명 이하 + 소규모**로 강화. 그 외엔 AUTO_MODE여도 AskUserQuestion 필수. (전 역할 3중이라 비용이 역할 수에 곱해짐.)
+- `--ultra=selective`: 자동 승인 기준을 **일반 규칙으로 되돌림** (5명 + 소/중규모). 총 토큰이 `--cross`와 유사한 수준이므로 full처럼 게이팅할 필요 없음. 단 총 예상 비용이 전체 기대의 1.5배 초과 시엔 여전히 AskUserQuestion.
 
-**Ultra 모드 추가 승인**: `ULTRA_MODE=true`이면 자동 승인 조건을 **4명 이하 + 소규모**로 강화한다. 그 외에는 AUTO_MODE여도 AskUserQuestion 필수. Ultra는 역할 수에 비용이 곱해지므로 사용자 확인이 특히 중요하다.
+manifest에 `cost_estimate` + `ultra_strategy` + 역할별 `replicas` 목록 기록 (resume 시 동일 토폴로지 복원 재사용).
 
 ### Phase 1: 에이전트 병렬 생성
 
@@ -1669,9 +1705,10 @@ _PROMPT="/tmp/ta-${_RUN_ID}-AGENT_NAME-prompt.txt"
 _OUTPUT=$(mktemp "/tmp/ta-${_RUN_ID}-AGENT_NAME-output.XXXXXX")
 _EXEC_DIR="${SCOPE_PATH:-$_PROJECT_DIR}"
 
-# 600초(10분) 실행 한도 + 30초 SIGTERM grace (Phase 1 agent soft limit과 일치).
+# agent_soft_sec(기본 600) 실행 한도 + grace_sec(기본 30) SIGTERM grace.
+# 설정은 Preamble 0.1에서 refs/config.json + refs/config.local.json 병합으로 주입.
 # rc=124(timeout) / rc=137(SIGKILL) / non-zero → 에이전트 실패로 처리 → 기존 retry·circuit breaker 동작.
-_run_with_timeout 600 30 \
+_run_with_timeout "${_CFG_AGENT_SOFT_SEC:-600}" "${_CFG_GRACE_SEC:-30}" \
   codex exec - -s read-only -C "$_EXEC_DIR" \
     --output-schema "$_SCHEMA" -o "$_OUTPUT" \
     --skip-git-repo-check < "$_PROMPT"
@@ -1679,7 +1716,7 @@ _CODEX_RC=$?
 
 case "$_CODEX_RC" in
   0)   cat "$_OUTPUT" ;;
-  124) echo "[team-agent] codex agent timed out (600s) — marking as failed" >&2 ;;
+  124) echo "[team-agent] codex agent timed out (${_CFG_AGENT_SOFT_SEC:-600}s) — marking as failed" >&2 ;;
   137) echo "[team-agent] codex agent SIGKILL after grace — marking as failed" >&2 ;;
   127) echo "[team-agent] codex CLI not found — marking as failed" >&2 ;;
   *)   echo "[team-agent] codex agent non-zero rc=$_CODEX_RC — marking as failed" >&2 ;;
@@ -1755,21 +1792,23 @@ _OUTPUT=$(mktemp "/tmp/ta-${_RUN_ID}-AGENT_NAME-output.XXXXXX")
 _STDERR="/tmp/ta-${_RUN_ID}-AGENT_NAME-stderr.log"
 : > "$_STDERR" && chmod 600 "$_STDERR"
 
-# 600초 + 30초 grace. 네트워크 wedge / 인증 stall 방어.
+# agent_soft_sec + grace_sec. 네트워크 wedge / 인증 stall 방어.
+# 모델: _pick_gemini_model agent → refs/config.json candidates_agent 우선순위 배열에서 가용 첫 후보.
+_GEMINI_AGENT_MODEL="$(_pick_gemini_model agent)"
 if [ "$GEMINI_HAS_SCHEMA" -gt 0 ]; then
-  _run_with_timeout 600 30 \
-    gemini -m gemini-3.1-flash-lite-preview --json-schema "$_SCHEMA" \
+  _run_with_timeout "${_CFG_AGENT_SOFT_SEC:-600}" "${_CFG_GRACE_SEC:-30}" \
+    gemini -m "$_GEMINI_AGENT_MODEL" --json-schema "$_SCHEMA" \
       -p - < "$_PROMPT" > "$_OUTPUT" 2>"$_STDERR"
 else
-  _run_with_timeout 600 30 \
-    gemini -m gemini-3.1-flash-lite-preview -p - < "$_PROMPT" > "$_OUTPUT" 2>"$_STDERR"
+  _run_with_timeout "${_CFG_AGENT_SOFT_SEC:-600}" "${_CFG_GRACE_SEC:-30}" \
+    gemini -m "$_GEMINI_AGENT_MODEL" -p - < "$_PROMPT" > "$_OUTPUT" 2>"$_STDERR"
 fi
 _GEMINI_RC=$?
 
 # rc 기반 에이전트 실패 처리 (기존 retry/circuit-breaker 발동).
 case "$_GEMINI_RC" in
   0)   cat "$_OUTPUT" ;;
-  124) echo "[team-agent] gemini agent timed out (600s) — marking as failed" >&2 ;;
+  124) echo "[team-agent] gemini agent timed out (${_CFG_AGENT_SOFT_SEC:-600}s) — marking as failed" >&2 ;;
   137) echo "[team-agent] gemini agent SIGKILL after grace — marking as failed" >&2 ;;
   127) echo "[team-agent] gemini CLI not found — marking as failed" >&2 ;;
   *)   echo "[team-agent] gemini agent non-zero rc=$_GEMINI_RC — marking as failed" >&2 ;;
