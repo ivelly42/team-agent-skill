@@ -77,18 +77,26 @@ _pick_gemini_model() {
     else
         _cands_str="$_CFG_GEMINI_AGENT_CANDIDATES"
     fi
+    # Probe timeout (round-8): gemini CLI가 만료 토큰·keychain·네트워크 wedge로 무한 대기
+    # 할 수 있으므로 각 probe를 _run_with_timeout 15초로 감싼다. 3-tier 래퍼 재사용.
+    local _probe_sec=15 _probe_grace=5
     local _m _err _rc
     while IFS= read -r _m; do
         [ -z "$_m" ] && continue
-        _err=$(gemini -m "$_m" -p "ping" </dev/null 2>&1 >/dev/null)
+        _err=$(_run_with_timeout "$_probe_sec" "$_probe_grace" gemini -m "$_m" -p "ping" </dev/null 2>&1 >/dev/null)
         _rc=$?
         if [ "$_rc" -eq 0 ]; then
             printf '%s' "$_m"; return 0
         fi
-        # 429 capacity exhaust → 10초 대기 후 재시도 1회
+        # rc=124/137 → probe 자체가 timeout/killed. 다음 후보로.
+        if [ "$_rc" -eq 124 ] || [ "$_rc" -eq 137 ]; then
+            echo "[_pick_gemini_model] skip $_m (probe timeout rc=$_rc)" >&2
+            continue
+        fi
+        # 429 capacity exhaust → 10초 대기 후 재시도 1회 (재시도도 timeout 래핑)
         if echo "$_err" | grep -q 'RESOURCE_EXHAUSTED\|rateLimitExceeded\|capacity'; then
             sleep 10
-            if gemini -m "$_m" -p "ping" </dev/null >/dev/null 2>&1; then
+            if _run_with_timeout "$_probe_sec" "$_probe_grace" gemini -m "$_m" -p "ping" </dev/null >/dev/null 2>&1; then
                 printf '%s' "$_m"; return 0
             fi
         fi

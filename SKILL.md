@@ -77,7 +77,7 @@ fi
 : > "$_TA_CFG_FILE" && chmod 600 "$_TA_CFG_FILE"
 
 python3 - "$_TA_CFG_FILE" <<'PYEOF'
-import json, os, shlex, sys
+import json, os, re, shlex, sys
 
 OUT_PATH = sys.argv[1]
 SKILL_DIR = os.environ.get("_SKILL_DIR", "")
@@ -150,7 +150,19 @@ try:
         f"export _CFG_GEMINI_VERIFIER_CANDIDATES={q(' '.join(gm['candidates_verifier']))}",
     ]
     # round-6: codex 모델·reasoning_effort 명시 고정 (user ~/.codex/config.toml drift 차단)
+    # round-8: 값이 bash 문자열 보간으로 `-c "model_reasoning_effort=\"$VAR\""` TOML 문자열에 재삽입되므로,
+    # 따옴표/백슬래시/줄바꿈/백틱이 들어있으면 TOML 인젝션. shell-quote는 shell 안전만 보장 — TOML은 별개.
+    # 해결: 엄격 화이트리스트 강제 (영숫자·하이픈·언더스코어·점만 허용, 길이 1~64).
+    # refs/config.local.json이 악의적 값 주입해도 Preamble 0.1이 abort하여 fail-closed.
     cx = cfg["codex"]
+    _ALLOWED = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+    for _ck in ("agent_model", "verifier_model", "reasoning_effort_agent", "reasoning_effort_verifier"):
+        _cv = cx.get(_ck, "")
+        if not isinstance(_cv, str) or not _ALLOWED.match(_cv):
+            sys.stderr.write(
+                f"[team-agent] FATAL: codex.{_ck} 값이 화이트리스트 위반(영숫자·._- 만 허용, 1~64자): {_cv!r}\n"
+            )
+            sys.exit(1)
     lines += [
         f"export _CFG_CODEX_AGENT_MODEL={q(cx['agent_model'])}",
         f"export _CFG_CODEX_VERIFIER_MODEL={q(cx['verifier_model'])}",
@@ -187,16 +199,22 @@ fi
 
 # 핵심 변수 sanity check — 혹시라도 exports가 비면 즉시 abort.
 # round-6: codex 4개 변수(_CFG_CODEX_*)도 필수로 포함. user config.toml drift 방어.
+# round-8 HS8 (실전 dry-run 발견): bash-전용 indirect expansion(느낌표 접두어 파라미터
+# 확장)은 Claude Code Bash 도구가 zsh로 실행될 때 "bad substitution"으로 fail.
+# 테스트는 `bash`로 명시 실행되어 PASS했지만 프로덕션은 zsh → 모든 스킬 실행이
+# 여기서 abort. 해결: eval 기반 간접 참조 패턴 — bash/zsh 양쪽에서 동작.
 for _var in _CFG_AGENT_SOFT_SEC _CFG_VERIFY_SEC _CFG_GRACE_SEC _CFG_CODEMAP_SEC \
             _CFG_GEMINI_AGENT_CANDIDATES _CFG_GEMINI_VERIFIER_CANDIDATES \
             _CFG_CODEX_AGENT_MODEL _CFG_CODEX_VERIFIER_MODEL \
             _CFG_CODEX_REASONING_AGENT _CFG_CODEX_REASONING_VERIFIER; do
-  if [ -z "${!_var:-}" ]; then
+  eval "_val=\"\${$_var:-}\""
+  if [ -z "$_val" ]; then
     echo "[team-agent] FATAL: $_var 미바인딩 — config 로드가 조용히 실패함" >&2
     rm -f "$_TA_CFG_FILE"
     exit 1
   fi
 done
+unset _val
 
 # cfg.env는 persistent으로 유지 — 이후 Bash 블록이 source한다.
 # round-5 C4 대응: helper 함수(_pick_gemini_model, _run_with_timeout)도 같이 로드되도록
@@ -230,6 +248,18 @@ source "$HOME/.cache/team-agent/cfg-${_RUN_ID}.env" 2>/dev/null || {
 }
 # === 이후 $_CFG_* 참조는 항상 바인딩 상태로 진입 ===
 ```
+
+**LLM 세션 차원 fail-closed 지침 (round-8, Codex finding #11)**:
+
+> Claude Code의 Bash 도구는 도구 호출 단위로 새 셸을 띄우므로, 위 `exit 1`은 **그 한 번의 Bash 호출만 종료**시킬 뿐 LLM의 instruction-following 세션은 멈추지 않는다. CI 파이프라인처럼 단일 프로세스 abort가 전체 흐름을 중단시키는 게 아니라, LLM은 "bash exited 1"을 본 뒤 다음 단계를 계속 시도할 수 있다. 이는 fail-closed를 theater로 전락시키는 핵심 구조적 위험이다.
+>
+> **LLM(즉 이 스킬을 실행하는 너 자신)에게 명시적 요구사항**: Bash 블록에서 `[team-agent] FATAL`로 시작하는 stderr 메시지 또는 `exit 1`(또는 비0 종료 코드)을 관찰하면, **후속 Phase 블록을 실행하지 말고 사용자에게 에러 원인을 보고하고 즉시 스킬 실행을 종료**한다. 특히 다음 패턴은 cascading 실패로 이어지므로 절대 무시하지 않는다:
+> - `config 로드 abort` / `cfg.env source 실패` / `미바인딩` — Preamble 0.1 실패
+> - `refs/gemini-helper.sh 누락` — 헬퍼 파일 부재
+> - `cfg.env 없음` — 후속 블록이 Preamble 미실행 상태에서 호출됨
+> - `codex.<key> 값이 화이트리스트 위반` — TOML 인젝션 방어 트리거
+>
+> "복구 시도 후 계속"은 금지. 복구는 사용자가 원인을 파악하고 명시적으로 재시도하라고 지시했을 때만 수행한다.
 
 Phase 5 완료 후 정리 블록:
 ```bash
@@ -483,10 +513,12 @@ LLM은 사용자 입력을 셸 명령에 직접 삽입하지 않는다. 대신 2
 
 1. **Write 도구**로 사용자 입력을 `/tmp/ta-${_RUN_ID}-input.txt`에 저장한다 (셸을 거치지 않으므로 인젝션 원천 차단).
 
-2. **Bash 도구**로 임시 파일을 읽어 sanitize한다:
+2. **Bash 도구**로 임시 파일을 읽어 sanitize한다 (새 셸이므로 cfg.env 먼저 source — fail-closed):
 ```bash
+source "$HOME/.cache/team-agent/cfg-${_RUN_ID}.env" 2>/dev/null || {
+  echo "[team-agent] FATAL: cfg.env 없음 — Preamble 0.1 먼저 실행" >&2; exit 1; }
 TASK_PURPOSE=$(python3 <<'PYEOF'
-import re, unicodedata
+import re, unicodedata, os, sys
 with open("/tmp/ta-RUN_ID_VALUE-input.txt", encoding='utf-8') as f:
     raw = f.read()
 # 유니코드 정규화: NFKD로 합성 문자 분해(예: U+FE63 small hyphen → U+002D) → hyphen 등가 통합 → NFC로 한글 재조합
@@ -507,9 +539,12 @@ raw = unicodedata.normalize('NFC', raw)
 raw = re.sub(r'[^a-zA-Z0-9\s\-_.,:()!\'\"?가-힣]', '', raw)
 # JSON-safe 보장: Write 도구 → json.dumps() 경로에서 자동 이스케이프되므로
 # 여기서는 길이 제한만 적용. 큰따옴표/백슬래시는 json.dumps()가 처리.
-# 길이는 Preamble 0.1에서 export된 _CFG_TASK_PURPOSE_CHARS 사용 (기본 500).
-import os
-_MAX_LEN = int(os.environ.get("_CFG_TASK_PURPOSE_CHARS", "500"))
+# 길이는 Preamble 0.1에서 export된 _CFG_TASK_PURPOSE_CHARS 직접 참조 (폴백 금지 — fail-closed).
+try:
+    _MAX_LEN = int(os.environ["_CFG_TASK_PURPOSE_CHARS"])
+except KeyError:
+    sys.stderr.write("[team-agent] FATAL: _CFG_TASK_PURPOSE_CHARS 미바인딩 — cfg.env source 누락\n")
+    sys.exit(1)
 print(raw[:_MAX_LEN], end='')
 PYEOF
 )
@@ -2219,7 +2254,7 @@ LLM은 Agent 도구 호출 시 `model` 파라미터에 반드시 문자열 `"opu
 3. **심각도 결정**:
    - 2/3 이상 합의 → 다수결. 동수면 높은 쪽
    - 1/3 유니크 → 해당 에이전트 severity 유지, `contradiction: false`
-   - **모순 감지**: 동일 위치를 2+명이 보고했는데 severity 차이가 2단계 이상(예: Critical vs Low) → `contradiction: true` 플래그
+   - **모순 감지 (결정론 규칙)**: severity rank는 `Critical=4, High=3, Medium=2, Low=1, Info=0`. 동일 위치를 2+명이 보고했는데 각 에이전트의 severity rank 최대값·최소값 차이(`max(ranks) - min(ranks)`)가 2 이상이면 `contradiction: true`. 예: Critical(4) vs Medium(2) → diff=2 → true. Critical(4) vs High(3) → diff=1 → false.
 
 4. **evidence 병합**:
    - 3/3: "Claude/Codex/Gemini 모두 지적: {핵심 근거 요약}"
@@ -2237,13 +2272,14 @@ LLM은 Agent 도구 호출 시 `model` 파라미터에 반드시 문자열 `"opu
 
 ## 출력 형식 (반드시 JSON)
 
-> **출력 키 강제 (round-7 schema drift 방어)**: 최상위 키는 정확히 `role`, `replicas`, `consensus_findings`, `consensus_ideas`, `contradictions`, `status`, `error`(선택) 7개만 사용한다. **`findings`/`ideas` 키 사용 금지** — round-5 메타 실행에서 5명 중 3명이 `findings`로 출력해 집계 시 alias 처리가 필요했다. 이번엔 `consensus_` 접두사 엄격 준수. 다른 키(예: `notes`, `summary`)도 추가 금지 — schema `additionalProperties: false`.
+> **출력 키 강제 (round-8 삼위일체 drift 방어)**: 최상위 키는 정확히 `role`, `consensus_findings`, `consensus_ideas`, `contradictions`, `status` 5개 필수 + `error`(status != ok 일 때만) 1개 선택. **`findings`/`ideas`/`replicas`/`notes`/`summary` 등 다른 키 사용 금지** — round-5 메타 실행에서 5명 중 3명이 `findings`로 출력해 alias 처리가 필요했고, round-7 prompt는 `replicas`를 허용으로 기술했으나 schema는 허용하지 않아 내부 모순이 있었다. 이번엔 schema(`refs/ultra-consolidation-schema.json`)·prompt·example 3곳이 동일. schema `additionalProperties: false`로 런타임 강제.
 >
 > **스키마 기준**: 아래 예시는 설명용이다. **구속력 있는 스키마는 `refs/ultra-consolidation-schema.json`** (JSON Schema Draft-07). 필드 추가·enum 수정은 **스키마 파일을 먼저 수정**한 뒤 이 예시를 동기화한다. 두 곳 drift 방지용 단일 진실.
 
 ```json
 {
   "role": "{역할이름}",
+  "status": "ok",
   "consensus_findings": [
     {
       "severity": "...",
@@ -2256,7 +2292,7 @@ LLM은 Agent 도구 호출 시 `model` 파라미터에 반드시 문자열 `"opu
       "agreement": "3/3|2/3|1/3|2/2|1/2|1/1",
       "confidence": "high|medium|low",
       "unique_source": "claude|codex|gemini|null",
-      "contradiction": true|false,
+      "contradiction": true,
       "severity_votes": {"claude":"High","codex":"Medium","gemini":"High"},
       "action": "...",
       "category": "..."
@@ -2283,6 +2319,7 @@ LLM은 Agent 도구 호출 시 `model` 파라미터에 반드시 문자열 `"opu
   ]
 }
 ```
+(실패 경로 shape는 아래 "Shape-stable contract" 섹션 참조 — `status`는 필수, `error`는 status != ok 일 때만 추가)
 
 ## 금지 사항
 - 새 이슈 발견 금지. 3개 입력에 없는 이슈를 추가하지 말라.
@@ -2577,10 +2614,15 @@ fi
 
 **cfg.env 정리 (HS7 대응, 필수)**: Phase 5 완료 시 현재 RUN_ID의 cfg.env를 명시적으로 삭제한다. 7일 mtime 스윕은 다음 실행에서만 수행되므로, 지금 실행한 RUN_ID의 cfg.env는 스킬 종료 전에 직접 제거해야 `$HOME/.cache/team-agent/` 누적을 막는다. 실패해도 스킬 출력은 성공으로 처리 (로컬 캐시 잔존은 치명적이지 않음).
 
+**round-8 best-effort (Codex finding #8)**: 이전 버전은 `source cfg.env || exit 1`로 fail-closed였으나, 이는 역설적으로 cleanup 자체를 막는다 — 앞 Phase에서 조기 abort된 경우 cfg.env가 없어 `exit 1`이 발생하고 cleanup 블록이 실행 전에 죽는다. cleanup은 **cfg.env 존재와 무관하게 best-effort로 진행**되어야 한다. `rm -f`는 이미 파일이 없으면 조용히 성공하므로 추가 조건 불필요.
+
 ```bash
-source "$HOME/.cache/team-agent/cfg-${_RUN_ID}.env" 2>/dev/null || { echo "[team-agent] FATAL: cfg.env 없음 — Preamble 0.1 미실행" >&2; exit 1; }
+# cfg.env source는 시도하되 실패해도 계속 (cleanup은 파일 존재 여부와 무관)
+source "$HOME/.cache/team-agent/cfg-${_RUN_ID}.env" 2>/dev/null || true
 # 현재 RUN_ID cfg.env 제거 — 다음 Bash 블록은 이 파일을 참조할 수 없으므로 Phase 5 맨 마지막 블록이어야 함
 rm -f "$HOME/.cache/team-agent/cfg-${_RUN_ID}.env"
+# 추가: 24시간 이상 된 다른 cfg-*.env 스윕 (Preamble 0.1의 7일보다 공격적 — 동일 디렉토리 클린)
+find "$HOME/.cache/team-agent" -maxdepth 1 -type f -name 'cfg-*.env' -mmin +1440 -delete 2>/dev/null || true
 echo "[team-agent] cfg.env 정리 완료"
 ```
 

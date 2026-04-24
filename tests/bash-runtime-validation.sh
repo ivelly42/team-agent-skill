@@ -312,10 +312,129 @@ fi
 # =========================================================================
 # R19. round-7: Phase 2.5 프롬프트가 schema key 강제 (findings 사용 금지 명시)
 # =========================================================================
-if grep -q 'findings` 키 사용 금지\|`findings`/`ideas` 키 사용 금지' "$SKILL_DIR/SKILL.md"; then
-    pass "R19 — round-7: Phase 2.5 프롬프트가 findings 키 사용 금지 명시 (schema drift 방어)"
+if grep -qE '`findings`[^.]*키 사용 금지|findings` 키 사용 금지' "$SKILL_DIR/SKILL.md"; then
+    pass "R19 — round-7+8: Phase 2.5 프롬프트가 findings 키 사용 금지 명시 (schema drift 방어)"
 else
-    fail "R19 — round-7: Phase 2.5 프롬프트 schema drift 방어 문구 누락"
+    fail "R19 — round-7+8: Phase 2.5 프롬프트 schema drift 방어 문구 누락"
+fi
+
+# =========================================================================
+# R20. round-8 C1: CRITICAL schema drift 삼위일체 — replicas 허용 안 하고 example에 status
+# =========================================================================
+if grep -q 'replicas`/`notes`/`summary` 등 다른 키 사용 금지' "$SKILL_DIR/SKILL.md" \
+   && grep -qE '"status":\s*"ok"' "$SKILL_DIR/SKILL.md"; then
+    pass "R20 — round-8 C1: Ultra schema 삼위일체 sync (prompt 금지 키·example에 status 포함)"
+else
+    fail "R20 — round-8 C1: replicas 금지 또는 example status 필드 누락"
+fi
+
+# =========================================================================
+# R21. round-8 C2: contradiction threshold 숫자 rank 명시
+# =========================================================================
+if grep -q 'Critical=4, High=3, Medium=2, Low=1, Info=0' "$SKILL_DIR/SKILL.md" \
+   && grep -q 'Critical=4/High=3/Medium=2/Low=1/Info=0' "$SKILL_DIR/refs/ultra-consolidation-schema.json"; then
+    pass "R21 — round-8 C2: contradiction severity rank 매핑 명시 (prompt + schema 양쪽)"
+else
+    fail "R21 — round-8 C2: severity rank 숫자 매핑 누락 (prompt 또는 schema)"
+fi
+
+# =========================================================================
+# R22. round-8 C3: TASK_PURPOSE sanitizer fail-closed (os.environ[] + source cfg.env)
+# =========================================================================
+if grep -q 'os.environ\["_CFG_TASK_PURPOSE_CHARS"\]' "$SKILL_DIR/SKILL.md" \
+   && ! grep -q 'os.environ.get("_CFG_TASK_PURPOSE_CHARS"' "$SKILL_DIR/SKILL.md"; then
+    pass "R22 — round-8 C3: TASK_PURPOSE sanitizer가 직접 참조 (폴백 없음, fail-closed)"
+else
+    fail "R22 — round-8 C3: TASK_PURPOSE sanitizer에 .get(..., '500') 폴백 잔존"
+fi
+
+# =========================================================================
+# R23. round-8 C4: _pick_gemini_model probe가 _run_with_timeout 래핑
+# =========================================================================
+if grep -qE '_run_with_timeout "\$_probe_sec".*gemini -m' "$SKILL_DIR/refs/gemini-helper.sh"; then
+    pass "R23 — round-8 C4: Gemini probe가 _run_with_timeout 래핑 (무한 wedge 방지)"
+else
+    fail "R23 — round-8 C4: _pick_gemini_model probe가 타임아웃 래퍼 없이 직접 호출"
+fi
+
+# =========================================================================
+# R24. round-8 C7: Codex -c 값 enum 화이트리스트 검증 (TOML 인젝션 방어)
+# =========================================================================
+if grep -q '_ALLOWED = re.compile' "$SKILL_DIR/SKILL.md" \
+   && grep -q '화이트리스트 위반' "$SKILL_DIR/SKILL.md"; then
+    pass "R24 — round-8 C7: Codex codex.* 값 enum 화이트리스트 강제 (TOML 인젝션 방어)"
+else
+    fail "R24 — round-8 C7: codex 값 화이트리스트 검증 누락 — TOML 인젝션 가능"
+fi
+
+# =========================================================================
+# R25. round-8 C8: Phase 5 cleanup best-effort (cfg.env source 실패해도 진행)
+# =========================================================================
+# Phase 5 cleanup 블록이 `|| true` 사용하는지 검사 (`|| exit 1` 아니어야).
+if awk '/Phase 5: 완료/,/cfg.env 정리 완료/' "$SKILL_DIR/SKILL.md" | grep -q 'cfg-\${_RUN_ID}.env" 2>/dev/null || true'; then
+    pass "R25 — round-8 C8: Phase 5 cleanup best-effort (source 실패해도 rm 계속)"
+else
+    fail "R25 — round-8 C8: Phase 5 cleanup이 fail-closed source로 자가 abort 가능"
+fi
+
+# =========================================================================
+# R26. round-8 C5: secret scrubber 재귀 스크러빙 (scrub_finding이 모든 string 필드 재귀)
+# =========================================================================
+if grep -q '_scrub_recursive' "$SKILL_DIR/refs/secret-scrubber.py"; then
+    pass "R26 — round-8 C5: secret scrubber 재귀 (code_snippet·evidence 외 필드도 커버)"
+else
+    fail "R26 — round-8 C5: scrub_finding이 여전히 2개 필드만 처리 (title/action 미커버)"
+fi
+
+# =========================================================================
+# R27. round-8 C6: secret scrubber 신규 패턴 (Stripe/Twilio/npm/Azure/GitLab)
+# =========================================================================
+if grep -q 'REDACTED_STRIPE' "$SKILL_DIR/refs/secret-scrubber.py" \
+   && grep -q 'REDACTED_TWILIO' "$SKILL_DIR/refs/secret-scrubber.py" \
+   && grep -q 'REDACTED_NPM_TOKEN' "$SKILL_DIR/refs/secret-scrubber.py" \
+   && grep -q 'REDACTED_AZURE_KEY' "$SKILL_DIR/refs/secret-scrubber.py"; then
+    pass "R27 — round-8 C6: secret scrubber 신규 프로바이더 패턴 (Stripe·Twilio·npm·Azure)"
+else
+    fail "R27 — round-8 C6: Stripe/Twilio/npm/Azure 중 일부 패턴 누락"
+fi
+
+# =========================================================================
+# R28. round-8 C9: Bash exit 1 뒤 LLM 세션 stop 지침 문서화
+# =========================================================================
+if grep -q 'LLM 세션 차원 fail-closed 지침' "$SKILL_DIR/SKILL.md"; then
+    pass "R28 — round-8 C9: Bash exit 1이 LLM을 막지 못함 — skill-level stop 지침 명시"
+else
+    fail "R28 — round-8 C9: LLM 세션 stop 지침 누락 — fail-closed가 bash-only로 한정"
+fi
+
+# =========================================================================
+# R29. round-8 HS8: Preamble 0.1 sanity check가 zsh 호환 (bash `${!var}` 금지)
+# Claude Code Bash 도구가 zsh로 실행 — dry-run 실전에서 "bad substitution" 발견.
+# 전까지 bash 명시 테스트로만 PASS하던 self-fulfillment 패턴 파괴.
+# =========================================================================
+# Preamble 0.1 구역 안에 bash-only indirect expansion `${!_var...}` 잔존 금지
+if awk '/^### Preamble 0.1/,/^---$/' "$SKILL_DIR/SKILL.md" | grep -qE '\$\{!_[A-Za-z_]+'; then
+    fail "R29 — round-8 HS8: Preamble 0.1에 bash-only \${!var} 잔존 — zsh에서 abort"
+else
+    pass "R29 — round-8 HS8: Preamble 0.1에 bash-only indirect expansion 없음 (zsh 호환)"
+fi
+
+# =========================================================================
+# R30. round-8 HS8 (실제 실행): sanity check loop를 zsh -c로 실제 돌려 PASS 확인
+# self-fulfilling test 안티패턴 탈출: 단순 grep이 아니라 zsh subprocess에서 실행.
+# =========================================================================
+_R30_OUT=$(zsh -c '
+  _CFG_A=hello _CFG_B=world
+  for _var in _CFG_A _CFG_B; do
+    eval "_val=\"\${$_var:-}\""
+    [ -z "$_val" ] && echo "FAIL: $_var" && exit 1
+  done
+  echo OK
+' 2>&1)
+if [ "$_R30_OUT" = "OK" ]; then
+    pass "R30 — round-8 HS8 (zsh 실제 실행): eval indirect expansion 패턴 zsh 호환"
+else
+    fail "R30 — round-8 HS8: zsh 실행 실패 — eval indirect 패턴이 zsh 호환되지 않음: $_R30_OUT"
 fi
 
 echo ""

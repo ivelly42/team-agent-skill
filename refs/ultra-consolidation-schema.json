@@ -103,7 +103,7 @@
           },
           "contradiction": {
             "type": "boolean",
-            "description": "동일 위치를 2명 이상이 보고했으나 severity 차이가 2단계 이상일 때 true"
+            "description": "severity rank Critical=4/High=3/Medium=2/Low=1/Info=0 기준, 동일 위치를 2명 이상이 보고했으나 max(rank)-min(rank) >= 2 일 때 true (예: Critical vs Medium=2 true, Critical vs High=1 false)"
           },
           "severity_votes": {
             "type": "object",

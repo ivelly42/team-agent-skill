@@ -21,15 +21,22 @@
 ```
 
 ## Current Status
-[2026-04-25] round-7 — **schema drift 방어 + secret scrubber + HS5/6/7** 완료. 최종 **148/148 PASS** (R15-R19 신규 5개 + 기존 143).
+[2026-04-25] round-8 — **Codex adversarial review 9/15 + HS8 (zsh 호환 fail-closed)** 완료. 최종 **159/159 PASS** (R20-R30 신규 11개 + 기존 148).
 
-핵심:
-- **(B) Phase 2.5 schema drift 방어**: Opus 통합자 프롬프트에 "출력 키는 `consensus_findings` 등 정확히 6개. `findings`/`ideas` 키 사용 금지. schema `additionalProperties: false`" 명시. round-5 메타 실행에서 5명 중 3명이 `findings` 쓴 이슈 구조적 차단.
-- **(C) secret scrubber 결정론**: `refs/secret-scrubber.py` 신규 — AWS/GitHub/OpenAI/Anthropic/Google/Slack/JWT/Bearer/password/DB conn/PEM 패턴 결정론 regex 치환. Phase 2 결과 수집 시 code_snippet·evidence에 scrub_findings 적용. 자가 테스트 8/8.
-- **(HS5) PROJECT_CONTEXT sanitizer 하드코딩 제거**: Step 2-9 의사코드가 `os.environ["_CFG_PROJECT_CONTEXT_CHARS"]` 사용. 3000 하드코딩 폴백 금지.
-- **(HS6) GEMINI_HAS_SCHEMA multi-line 오작동 수정**: `|| echo 0` → `|| true` + 숫자 외 값 0으로 강제. `0\n0` 정수 비교 오작동 방지.
-- **(HS7) Phase 5 cfg.env 정리 강화**: Phase 5 섹션에 명시적 cleanup 블록 추가 (`rm -f "$HOME/.cache/team-agent/cfg-${_RUN_ID}.env"`). 7일 mtime 스윕 의존 제거.
+핵심 (라운드-8, 공격 벡터 15개 중 수정 완료 9개):
+- **(C1 CRITICAL)** Ultra consolidator schema 삼위일체 drift 해소 — prompt에서 `replicas` 금지, example에 `status` 필수 추가, schema·prompt·example 3곳 동기화.
+- **(C2 LOW→실행)** Contradiction threshold 숫자 rank 결정론화 — Critical=4/High=3/Medium=2/Low=1/Info=0, `max-min >= 2` 규칙 명시 (prompt + schema description 동기화).
+- **(C3 HIGH)** TASK_PURPOSE sanitizer fail-closed — `os.environ.get(..., "500")` 폴백 제거 → `os.environ["..."]` 직접 참조 + 블록 선두 `source cfg.env` 삽입.
+- **(C4 HIGH)** Gemini probe 행 방지 — `_pick_gemini_model` 각 후보 probe를 `_run_with_timeout 15초`로 래핑. 토큰 만료·keychain·네트워크 wedge에서 스킬 전체 stall 차단.
+- **(C5 HIGH)** Secret scrubber 필드 재귀 — `scrub_finding`이 code_snippet·evidence만 처리 → 모든 string 필드(title·action·ideas.detail·nested) 재귀 스크러빙.
+- **(C6 MED)** Scrubber 신규 패턴 6종 — Stripe `sk_live_`/`rk_live_`/`pk_live_`, Twilio AC/SK, npm_, Azure AccountKey=, GitLab glpat-. Assignment 패턴은 quoted literal만 매치해 `password = options.get("password")` false-positive 차단.
+- **(C7 MED)** Codex `-c` TOML 인젝션 방어 — Preamble 0.1 Python loader가 `codex.agent_model`/`verifier_model`/`reasoning_effort_*` 값에 `^[A-Za-z0-9_.\-]{1,64}$` 화이트리스트 강제. `refs/config.local.json` 악성 값이 TOML로 재주입되기 전에 fail-closed.
+- **(C8 MED)** Phase 5 cleanup best-effort — `source cfg.env || exit 1` → `source ... || true` + `rm -f` 이어서 실행. 앞 Phase 조기 abort 시에도 cleanup이 자가-차단되지 않음. +24h mtime 스윕 추가.
+- **(C9 MED)** Bash `exit 1` vs LLM 세션 갭 명시화 — Preamble 0.1에 "LLM(skill runner) 차원 fail-closed 지침" 블록 추가: FATAL/exit 1 관찰 시 후속 Phase 실행 금지, 사용자 보고 후 종료 의무.
+- **(HS8 프로덕션 차단 버그)** Preamble 0.1 sanity check가 bash-전용 indirect expansion(느낌표 접두어 파라미터 확장) 사용. Claude Code Bash 도구는 zsh로 실행되므로 `bad substitution`으로 **모든 스킬 실행이 여기서 abort**. 테스트는 `bash tests/...` 로 명시 실행되어 PASS하던 test self-fulfillment의 정확한 실증. `/team-agent --ultra --dry-run` 실전 실행 중 발견. eval 기반 간접 참조로 교체 → bash/zsh 양쪽 동작. R29(grep) + R30(zsh 실제 subprocess 실행) 회귀 테스트 추가.
 
-이전 round 유지 (바뀌지 않음): round-4 5 bugs, round-5 gemini-helper.sh + source 가드 + bash-runtime-validation, round-6 codex `-m`/`-c` 명시.
+보류 (라운드-9 예정, 큰 리팩터): mktemp -d로 `/tmp/ta-*`·cfg.env 예측 경로 전환, scope TOCTOU 재검증, Opus 출력 jsonschema validation loop, PROJECT_CONTEXT sanitizer `refs/sanitize_context.py` 외부화, test gate 우회 클래스 (R8/R13/X5 확장).
 
-메타 분석 산출물 (로컬): `docs/team-agent/2026-04-25-012148-meta-report.md` (25KB).
+Codex adversarial findings 아카이브: `docs/team-agent/adversarial-reviews/2026-04-25-codex-round-8.md` (9.5KB, 15개 finding 원문).
+
+이전 round 유지 (바뀌지 않음): round-4 5 bugs, round-5 gemini-helper.sh + source 가드, round-6 codex `-m`/`-c` 명시, round-7 scrubber + HS5/6/7.
