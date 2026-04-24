@@ -196,6 +196,67 @@ else
     fail "R10 — Preamble 0.1에서 helper source 라인 append 지시 누락"
 fi
 
+# =========================================================================
+# R11. round-6: refs/config.json에 codex 섹션 4개 필드 존재
+# =========================================================================
+if env _CFG="$CONFIG" python3 -c "
+import json, os, sys
+cfg = json.load(open(os.environ['_CFG']))
+cx = cfg.get('codex', {})
+for k in ('agent_model','verifier_model','reasoning_effort_agent','reasoning_effort_verifier'):
+    if k not in cx: sys.exit(1)
+sys.exit(0)
+" 2>/dev/null; then
+    pass "R11 — round-6: refs/config.json codex 섹션 4 필드 완비"
+else
+    fail "R11 — round-6: refs/config.json codex 섹션 필드 누락"
+fi
+
+# =========================================================================
+# R12. round-6: Preamble 0.1이 _CFG_CODEX_* 4개 export
+# =========================================================================
+_R12_COUNT=$(grep -cE 'export _CFG_CODEX_(AGENT_MODEL|VERIFIER_MODEL|REASONING_AGENT|REASONING_VERIFIER)' "$SKILL_DIR/SKILL.md")
+if [ "$_R12_COUNT" -ge 4 ]; then
+    pass "R12 — round-6: Preamble 0.1에서 _CFG_CODEX_* 4개 export"
+else
+    fail "R12 — round-6: _CFG_CODEX_* export 누락 ($_R12_COUNT/4)"
+fi
+
+# =========================================================================
+# R13. round-6: 모든 codex exec 호출이 -m "$_CFG_CODEX_*_MODEL" 포함
+# =========================================================================
+if env _SKILL_DIR_TEST="$SKILL_DIR" python3 <<'PYEOF' >/dev/null 2>&1
+import re, os, glob, sys
+SKILL_DIR = os.environ["_SKILL_DIR_TEST"]
+missing = 0
+total = 0
+for p in [f"{SKILL_DIR}/SKILL.md"] + sorted(glob.glob(f"{SKILL_DIR}/refs/*.md")):
+    with open(p) as f: txt = f.read()
+    for m in re.finditer(r'```bash\n(.*?)\n```', txt, flags=re.DOTALL):
+        body = m.group(1)
+        if 'codex exec' in body and '_run_with_timeout' in body:
+            total += 1
+            if '-m "$_CFG_CODEX_AGENT_MODEL"' not in body and '-m "$_CFG_CODEX_VERIFIER_MODEL"' not in body:
+                missing += 1
+sys.exit(0 if (missing == 0 and total >= 3) else 1)
+PYEOF
+then
+    pass "R13 — round-6: 모든 codex exec 호출에 -m \"\$_CFG_CODEX_*_MODEL\" 주입"
+else
+    fail "R13 — round-6: codex exec -m 명시 누락 블록 잔존"
+fi
+
+# =========================================================================
+# R14. round-6: verifier codex는 VERIFIER 변수 참조 (agent vs verifier 분리)
+# =========================================================================
+if grep -q '_CFG_CODEX_VERIFIER_MODEL' "$SKILL_DIR/refs/codex-verification.md" \
+   && grep -q '_CFG_CODEX_VERIFIER_MODEL' "$SKILL_DIR/refs/cross-verification.md" \
+   && grep -q '_CFG_CODEX_REASONING_VERIFIER' "$SKILL_DIR/refs/codex-verification.md"; then
+    pass "R14 — round-6: verifier codex는 _CFG_CODEX_VERIFIER_* 참조"
+else
+    fail "R14 — round-6: verifier/agent 변수 혼용 또는 누락"
+fi
+
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Total: $((PASS+FAIL))  |  Passed: $PASS  |  Failed: $FAIL"

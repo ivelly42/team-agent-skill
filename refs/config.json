@@ -69,5 +69,12 @@
       "gemini-3-pro-preview",
       "gemini-2.5-pro"
     ]
+  },
+  "codex": {
+    "$comment": "round-6: codex exec 호출 시 -m + -c 'model_reasoning_effort=\"...\"' 명시 고정. user ~/.codex/config.toml이 변경돼도 스킬은 선언한 모델·effort 강제. agent vs verifier 분리로 정밀도·비용 trade-off 조정 가능. override는 refs/config.local.json의 codex 섹션으로.",
+    "agent_model": "gpt-5.5",
+    "verifier_model": "gpt-5.5",
+    "reasoning_effort_agent": "xhigh",
+    "reasoning_effort_verifier": "xhigh"
   }
 }

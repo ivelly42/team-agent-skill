@@ -146,8 +146,11 @@ _START_TS=$(date +%s)
 # ───────────────────────────────────────────────────────────
 (
   # timeout·grace는 Preamble 0.1에서 바인딩된 fail-closed _CFG_* 사용 (폴백 문법 금지).
+  # round-6: codex verifier 모델·effort 명시 주입 (user config.toml drift 차단).
   _run_with_timeout "$_CFG_VERIFY_SEC" "$_CFG_GRACE_SEC" \
     codex exec - -s read-only -C "$_EXEC_DIR" \
+      -m "$_CFG_CODEX_VERIFIER_MODEL" \
+      -c "model_reasoning_effort=\"$_CFG_CODEX_REASONING_VERIFIER\"" \
       --output-schema "${_SKILL_DIR}/refs/cross-verification-schema.json" \
       -o "$_CODEX_OUT" \
       --skip-git-repo-check \

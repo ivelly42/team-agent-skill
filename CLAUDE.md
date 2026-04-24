@@ -21,12 +21,10 @@
 ```
 
 ## Current Status
-[2026-04-25] round-5 — **Ultra 메타 분석 4개 Critical 실행 레벨 수정**. 최종 **139/139 PASS** (신규 bash-runtime-validation 10개 + 기존 12종 유지). 핵심:
+[2026-04-25] round-6 — **codex 모델·effort 명시 고정** (user config.toml drift 차단). 최종 **143/143 PASS** (bash-runtime-validation R11-R14 신규 + 기존 139 유지).
 
-(C1+C4 통합) `refs/gemini-helper.sh` 신규 — `_pick_gemini_model` + `_run_with_timeout` 단일 진실원. Preamble 0.1 cfg.env 끝에 `source gemini-helper.sh` auto-append → 모든 후속 Bash 블록이 `source cfg.env` 한 줄로 **변수+함수 둘 다** 바인딩. SKILL.md 8 + refs/*.md 3 = 11 블록에 source 가드 자동 삽입 (Python regex). bug_007이 문서에만 반영되던 근본 결함 해결.
+핵심: `refs/config.json`에 `codex` 섹션 추가 (`agent_model`·`verifier_model`·`reasoning_effort_agent`·`reasoning_effort_verifier` = `gpt-5.5`/`gpt-5.5`/`xhigh`/`xhigh`). Preamble 0.1 Python loader가 `_CFG_CODEX_*` 4개 env var export + sanity check 포함. 모든 `codex exec` 호출 (Phase 0.3 codemap + Phase 1 agent + refs/codex-verification + refs/cross-verification) 에 `-m "$_CFG_CODEX_AGENT_MODEL"` 또는 `_VERIFIER_MODEL` + `-c "model_reasoning_effort=\"$_CFG_CODEX_REASONING_AGENT\""` 또는 `_VERIFIER` 명시. user가 `~/.codex/config.toml`의 default를 바꿔도 스킬은 선언한 모델·effort 강제. override는 `refs/config.local.json`의 `codex` 섹션으로.
 
-(C2) SKILL.md Phase 0.3 `_CODEMAP_RC=$?` 고아 할당 제거 — if/elif/else rc를 마지막 assignment 0이 덮어쓰던 bug_020.
+(이전 round-5 유지) `refs/gemini-helper.sh` 단일 진실원 + cfg.env 자동 소싱 + 11개 bash 블록 source 가드 + Phase 0.3 고아 rc 제거 + `bash-runtime-validation.sh` 런타임 검증.
 
-(C3) `tests/bash-runtime-validation.sh` 신규 — 자기충족 grep을 넘어 실제 bash subprocess로 Preamble 0.1 cross-invocation 시뮬레이션 + 함수 바인딩 + guard 커버리지 동적 검증. Ultra 메타 분석의 핵심 발견(129 PASS 자기충족 패턴) 극복.
-
-Ultra 메타 분석 산출물: `docs/team-agent/2026-04-25-012148-meta-report.md` (25KB, 64 findings + 41 ideas).
+메타 분석 산출물: `docs/team-agent/2026-04-25-012148-meta-report.md` (25KB, 64 findings + 41 ideas).

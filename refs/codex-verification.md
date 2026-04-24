@@ -137,7 +137,8 @@ _run_with_timeout "$_CFG_VERIFY_SEC" "$_CFG_GRACE_SEC" \
   codex exec - -s read-only \
     -C "PROJECT_DIR_VALUE" \
     --skip-git-repo-check \
-    -c 'model_reasoning_effort="xhigh"' < "$_VERIFY_PROMPT" 2>&1
+    -m "$_CFG_CODEX_VERIFIER_MODEL" \
+    -c "model_reasoning_effort=\"$_CFG_CODEX_REASONING_VERIFIER\"" < "$_VERIFY_PROMPT" 2>&1
 _EXIT=$?
 rm -f "$_VERIFY_PROMPT"
 

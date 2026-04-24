@@ -149,6 +149,14 @@ try:
         f"export _CFG_GEMINI_AGENT_CANDIDATES={q(' '.join(gm['candidates_agent']))}",
         f"export _CFG_GEMINI_VERIFIER_CANDIDATES={q(' '.join(gm['candidates_verifier']))}",
     ]
+    # round-6: codex 모델·reasoning_effort 명시 고정 (user ~/.codex/config.toml drift 차단)
+    cx = cfg["codex"]
+    lines += [
+        f"export _CFG_CODEX_AGENT_MODEL={q(cx['agent_model'])}",
+        f"export _CFG_CODEX_VERIFIER_MODEL={q(cx['verifier_model'])}",
+        f"export _CFG_CODEX_REASONING_AGENT={q(cx['reasoning_effort_agent'])}",
+        f"export _CFG_CODEX_REASONING_VERIFIER={q(cx['reasoning_effort_verifier'])}",
+    ]
 except KeyError as e:
     sys.stderr.write(f"[team-agent] FATAL: refs/config.json 필수 키 누락: {e}\n")
     sys.exit(1)
@@ -178,8 +186,11 @@ if ! source "$_TA_CFG_FILE"; then
 fi
 
 # 핵심 변수 sanity check — 혹시라도 exports가 비면 즉시 abort.
+# round-6: codex 4개 변수(_CFG_CODEX_*)도 필수로 포함. user config.toml drift 방어.
 for _var in _CFG_AGENT_SOFT_SEC _CFG_VERIFY_SEC _CFG_GRACE_SEC _CFG_CODEMAP_SEC \
-            _CFG_GEMINI_AGENT_CANDIDATES _CFG_GEMINI_VERIFIER_CANDIDATES; do
+            _CFG_GEMINI_AGENT_CANDIDATES _CFG_GEMINI_VERIFIER_CANDIDATES \
+            _CFG_CODEX_AGENT_MODEL _CFG_CODEX_VERIFIER_MODEL \
+            _CFG_CODEX_REASONING_AGENT _CFG_CODEX_REASONING_VERIFIER; do
   if [ -z "${!_var:-}" ]; then
     echo "[team-agent] FATAL: $_var 미바인딩 — config 로드가 조용히 실패함" >&2
     rm -f "$_TA_CFG_FILE"
@@ -264,6 +275,7 @@ _pick_gemini_model <role>
 - Phase 1 배치 간 sleep: `5초` → `_CFG_BATCH_SLEEP_SEC`
 - Phase 0.5 비용 오버헤드: Codex `+45K`·Gemini `+20K`·Opus `+25K` → `_CFG_OVERHEAD_CODEX`·`_CFG_OVERHEAD_GEMINI`·`_CFG_OVERHEAD_OPUS`
 - Phase 0.5 가중치 곱: `×1.5·1.0·0.7·0.5` → `_CFG_WEIGHT_PRECISE`·`_CFG_WEIGHT_STRUCTURE`·`_CFG_WEIGHT_DOCS`·`_CFG_WEIGHT_EXPLORE`
+- **Codex 모델·effort (round-6)**: 모든 `codex exec` 호출에 `-m "$_CFG_CODEX_AGENT_MODEL"` 또는 `-m "$_CFG_CODEX_VERIFIER_MODEL"` + `-c "model_reasoning_effort=\"$_CFG_CODEX_REASONING_AGENT\""` 또는 verifier 대응. user `~/.codex/config.toml`이 변경돼도 스킬이 선언한 모델·effort 강제 (previously user default에 의존 → drift 위험).
 
 **로드 실패 폴백**: `refs/config.json`이 없거나 JSON 파싱 실패 시 Preamble 종료 (skill은 항상 config에 의존 — 하드코딩 금지). `refs/config.local.json`은 선택이므로 없으면 무시.
 
@@ -1536,6 +1548,8 @@ _EXEC_DIR="${SCOPE_PATH:-$_PROJECT_DIR}"
 
 _run_with_timeout "$_CFG_CODEMAP_SEC" 10 \
   codex exec - -s read-only -C "$_EXEC_DIR" \
+    -m "$_CFG_CODEX_AGENT_MODEL" \
+    -c "model_reasoning_effort=\"$_CFG_CODEX_REASONING_AGENT\"" \
     --output-schema "$_SCHEMA" -o "$_CODEMAP" \
     --skip-git-repo-check < "/tmp/ta-${_RUN_ID}-codemap-prompt.txt"
 _CODEMAP_RC=$?
@@ -1856,8 +1870,12 @@ _EXEC_DIR="${SCOPE_PATH:-$_PROJECT_DIR}"
 # agent_soft_sec(기본 600) 실행 한도 + grace_sec(기본 30) SIGTERM grace.
 # 설정은 Preamble 0.1에서 refs/config.json + refs/config.local.json 병합으로 주입.
 # rc=124(timeout) / rc=137(SIGKILL) / non-zero → 에이전트 실패로 처리 → 기존 retry·circuit breaker 동작.
+# round-6: codex 모델·reasoning_effort를 refs/config.json에서 명시 주입.
+# user ~/.codex/config.toml 변경과 무관하게 스킬 선언 값 강제.
 _run_with_timeout "$_CFG_AGENT_SOFT_SEC" "$_CFG_GRACE_SEC" \
   codex exec - -s read-only -C "$_EXEC_DIR" \
+    -m "$_CFG_CODEX_AGENT_MODEL" \
+    -c "model_reasoning_effort=\"$_CFG_CODEX_REASONING_AGENT\"" \
     --output-schema "$_SCHEMA" -o "$_OUTPUT" \
     --skip-git-repo-check < "$_PROMPT"
 _CODEX_RC=$?
