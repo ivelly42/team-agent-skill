@@ -257,6 +257,67 @@ else
     fail "R14 — round-6: verifier/agent 변수 혼용 또는 누락"
 fi
 
+# =========================================================================
+# R15. round-7 HS5: PROJECT_CONTEXT sanitizer가 _CFG_PROJECT_CONTEXT_CHARS 참조
+# =========================================================================
+if grep -qE '_CFG_PROJECT_CONTEXT_CHARS' "$SKILL_DIR/SKILL.md" \
+   && grep -qE 'os\.environ\["_CFG_PROJECT_CONTEXT_CHARS"\]' "$SKILL_DIR/SKILL.md"; then
+    pass "R15 — round-7 HS5: PROJECT_CONTEXT sanitizer가 _CFG_ 참조 (3000 하드코딩 제거)"
+else
+    fail "R15 — round-7 HS5: PROJECT_CONTEXT sanitizer _CFG_ 미참조 or os.environ 누락"
+fi
+
+# =========================================================================
+# R16. round-7 HS6: GEMINI_HAS_SCHEMA 실행 라인이 `|| echo 0` 대신 `|| true` 사용
+# (주석/설명 문구는 제외 — `GEMINI_HAS_SCHEMA=$(...)` 실제 할당만 검사)
+# =========================================================================
+_R16_BAD=$(grep -cE '^[[:space:]]*GEMINI_HAS_SCHEMA=.*\|\| echo 0' "$SKILL_DIR/SKILL.md" || true)
+case "$_R16_BAD" in ''|*[!0-9]*) _R16_BAD=0 ;; esac
+if [ "$_R16_BAD" = "0" ] && grep -qE '^[[:space:]]*GEMINI_HAS_SCHEMA=.*\|\| true' "$SKILL_DIR/SKILL.md"; then
+    pass "R16 — round-7 HS6: GEMINI_HAS_SCHEMA 할당이 \`|| true\` 사용 (multi-line int 비교 오작동 방지)"
+else
+    fail "R16 — round-7 HS6: GEMINI_HAS_SCHEMA 할당에 \`|| echo 0\` 잔존(${_R16_BAD}건) 또는 \`|| true\` 미사용"
+fi
+
+# =========================================================================
+# R17. round-7 HS7: Phase 5 cleanup 블록에 rm -f cfg-${_RUN_ID} 명시
+# =========================================================================
+if env _SKILL="$SKILL_DIR/SKILL.md" python3 <<'PYEOF' >/dev/null 2>&1
+import re, os, sys
+with open(os.environ["_SKILL"]) as f: txt = f.read()
+# Phase 5 섹션 이후에 rm -f cfg-${_RUN_ID} + echo 정리 완료 패턴이 있어야 함
+m = re.search(r'### Phase 5:.*?(?=###|\Z)', txt, re.DOTALL)
+if not m: sys.exit(1)
+body = m.group(0)
+if 'rm -f "$HOME/.cache/team-agent/cfg-${_RUN_ID}.env"' not in body: sys.exit(1)
+if 'cfg.env 정리 완료' not in body and 'cfg.env 정리' not in body: sys.exit(1)
+sys.exit(0)
+PYEOF
+then
+    pass "R17 — round-7 HS7: Phase 5 cleanup 블록 rm -f cfg-\${_RUN_ID} + 완료 로그"
+else
+    fail "R17 — round-7 HS7: Phase 5 cleanup 블록 누락 또는 불완전"
+fi
+
+# =========================================================================
+# R18. round-7: refs/secret-scrubber.py 존재 + 자가 테스트 통과
+# =========================================================================
+SCRUBBER="$SKILL_DIR/refs/secret-scrubber.py"
+if [ -f "$SCRUBBER" ] && python3 "$SCRUBBER" >/dev/null 2>&1; then
+    pass "R18 — round-7: secret-scrubber.py 존재 + 자가 테스트 8/8 통과"
+else
+    fail "R18 — round-7: secret-scrubber.py 누락 또는 자가 테스트 실패"
+fi
+
+# =========================================================================
+# R19. round-7: Phase 2.5 프롬프트가 schema key 강제 (findings 사용 금지 명시)
+# =========================================================================
+if grep -q 'findings` 키 사용 금지\|`findings`/`ideas` 키 사용 금지' "$SKILL_DIR/SKILL.md"; then
+    pass "R19 — round-7: Phase 2.5 프롬프트가 findings 키 사용 금지 명시 (schema drift 방어)"
+else
+    fail "R19 — round-7: Phase 2.5 프롬프트 schema drift 방어 문구 누락"
+fi
+
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Total: $((PASS+FAIL))  |  Passed: $PASS  |  Failed: $FAIL"
