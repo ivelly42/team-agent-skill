@@ -21,7 +21,28 @@
 ```
 
 ## Current Status
-[2026-04-25] round-10 — **test self-fulfillment 탈출** 완료. 최종 **16 test suite 전체 PASS** (shell-parity + e2e-preamble + e2e-agent-fixture 3종 신규 + fixture 3개 JSON).
+[2026-04-25] round-11-a — **Agent mock shim** 완료. 최종 **17 test suite 전체 PASS** (e2e-phase1-mock 신규). round-11 보류 중 "Mock shim 실제 구현" 먼저 처리, SKILL.md 분할은 round-11-b로 이월.
+
+round-11-a 산출물:
+- **`refs/mock-shim.sh`** — `_load_fixture_for_role(role)` + `_is_mock_mode` 함수. `TEAM_AGENT_TEST_MODE=fixture` 시 Phase 1이 Agent 도구 호출 대신 `refs/fixtures/agent-{role}.json` 읽도록 대체. 경로 순회 방어(영숫자·_·- 화이트리스트).
+- **SKILL.md Preamble 0.1** — cfg.env 말미에 mock-shim.sh source 자동 append (존재할 때만, fail-open 조건부 로드).
+- **SKILL.md Phase 1** — mock 모드 분기 문단 추가. LLM 지시: TEAM_AGENT_TEST_MODE=fixture 시 Agent 도구 대신 `_load_fixture_for_role` 호출. 테스트 외엔 활성화 금지 명시.
+- **`tests/e2e-phase1-mock.sh`** — zsh subprocess에서 mock shim 종단간 7/7 PASS. `_is_mock_mode` 토글·3개 역할 fixture 로드 + schema validate·경로 순회 차단·미존재 role fail-closed.
+
+왜 Mock shim 먼저:
+- SKILL.md 분할(refs/phases/*.md 16파일)은 회귀 리스크 큼. 분할 전 종단간 테스트 안전망이 필요.
+- shim은 SKILL.md 거의 안 건드리고 즉시 ROI. fixture 3개 이미 round-10에서 준비됨.
+- 향후 Agent Mock이 LLM 없이도 Phase 1 → Phase 2 → Phase 4 플로우 전체 테스트 가능하게 만듦.
+
+보류 (round-11-b 예정):
+- SKILL.md 2674줄 분할 (Codex round-9 제안안 `docs/team-agent/adversarial-reviews/2026-04-25-codex-round-9-proposal.md` 참고)
+- mktemp -d 기반 /tmp/ta-* · cfg.env 예측 경로 전환 (TOCTOU)
+- PROJECT_CONTEXT sanitizer `refs/sanitize_context.py` 외부화 (SKILL.md Python heredoc 의존 해소)
+
+round-10 산출물 유지: shell-parity.sh + e2e-preamble.sh + e2e-agent-fixture.sh + fixture 3개 JSON
+
+[이전 상태]
+round-10 — test self-fulfillment 탈출 완료. 16 test suite 전체 PASS (shell-parity + e2e-preamble + e2e-agent-fixture 3종 신규 + fixture 3개 JSON).
 
 왜 필요했는가:
 - round-8 HS8(bash-only `${!var}` → zsh bad substitution)이 **테스트 159개 PASS 상태에서 프로덕션 `/team-agent --ultra --dry-run`에서 폭발**. 기존 테스트가 전부 grep 기반 + `bash` 명시 실행이라 zsh parse 문제를 원천적으로 못 잡음. "테스트가 자기 자신만 검증하는" 구조적 결함이 round-9에서 3인 합의로 식별됨.

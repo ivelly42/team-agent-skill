@@ -228,6 +228,10 @@ if [ ! -f "$_SKILL_DIR/refs/gemini-helper.sh" ]; then
 fi
 {
   printf 'source %q\n' "$_SKILL_DIR/refs/gemini-helper.sh"
+  # round-11: Agent mock shim source (존재하면 로드, 없으면 조용히 생략 — fixture-test 모드에서만 사용)
+  if [ -f "$_SKILL_DIR/refs/mock-shim.sh" ]; then
+    printf 'source %q\n' "$_SKILL_DIR/refs/mock-shim.sh"
+  fi
   printf '_require_cfg\n'
 } >> "$_TA_CFG_FILE"
 
@@ -237,6 +241,11 @@ find "$_TA_CFG_DIR" -maxdepth 1 -type f -name 'cfg-*.env' -mtime +7 -delete 2>/d
 # 현재 셸에도 helper 즉시 소싱 (Preamble 블록 안에서 이어지는 sanity check용)
 # shellcheck disable=SC1090
 source "$_SKILL_DIR/refs/gemini-helper.sh"
+# round-11: mock shim도 현재 셸에 즉시 로드 (있으면)
+if [ -f "$_SKILL_DIR/refs/mock-shim.sh" ]; then
+  # shellcheck disable=SC1090
+  source "$_SKILL_DIR/refs/mock-shim.sh"
+fi
 _require_cfg
 
 echo "[team-agent] config 로드 완료 → $_TA_CFG_FILE (후속 Bash 블록이 이 파일을 source)"
@@ -1754,6 +1763,16 @@ def ultra_replicas_for_cost(role_weight: float, strategy: str,
 manifest에 `cost_estimate` + `ultra_strategy` + 역할별 `replicas` 목록 기록 (resume 시 동일 토폴로지 복원 재사용).
 
 ### Phase 1: 에이전트 병렬 생성
+
+**Mock 모드 분기 (round-11, 테스트 전용)**: `TEAM_AGENT_TEST_MODE=fixture`가 설정된 환경에서는 **Agent 도구를 호출하지 않고** `refs/mock-shim.sh`의 `_load_fixture_for_role` 함수로 `refs/fixtures/agent-{role}.json`을 직접 읽어 에이전트 결과로 사용한다. 이는 LLM 없이 Phase 1 → Phase 2 → Phase 4 플로우를 종단간 테스트하기 위한 경로이며, 실제 사용자 실행에선 절대 활성화하지 말 것. Phase 0.3(공유 코드맵)도 mock 모드에선 스킵한다(에이전트가 탐색하지 않으므로 코드맵 불요).
+
+Mock 모드 활성화 시 각 에이전트(역할)마다 다음을 수행한다:
+1. `role` 이름에서 fixture slug 결정 (예: "보안 감사" → `security`, "성능 엔지니어" → `performance`, "TDD 오케스트레이터" → `testing`). 매핑은 Step 3-2 slug 매핑과 동일하되, fixture가 없는 역할은 가장 근접한 `security`/`performance`/`testing` 중 하나로 폴백.
+2. Bash 도구로 `_load_fixture_for_role "$slug"`를 호출해 JSON을 stdout으로 받는다.
+3. 받은 JSON을 실제 Agent 결과처럼 Phase 2의 파싱·검증 단계로 그대로 전달. schema는 `refs/output-schema.json`과 동일하므로 후속 로직 변경 불요.
+4. `manifest.agent_backends[{name}] = "mock-fixture"`로 기록 (실제 backend와 구분).
+
+테스트 외 모든 실행 경로(`TEAM_AGENT_TEST_MODE` 미설정)에서는 아래 기본 동작을 따른다.
 
 **동시성 제한 (동적 배치)**: AGENT_COUNT에 따라 batch_size를 동적으로 조정한다.
 
