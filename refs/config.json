@@ -58,15 +58,15 @@
     "pessimistic": 1.5
   },
   "gemini": {
-    "$comment": "모델 alias 우선순위 배열. 실행 전 가용성 확인 후 첫 매치 사용 (I-5 아이디어)",
+    "$comment": "모델 alias 우선순위 배열. 실행 전 가용성 확인 후 첫 매치 사용. 2026-04-23 확인: gemini-3.1-flash-lite/preview 및 gemini-3.1-pro/gemini-3-pro/gemini-3-flash는 404 (alias 없음). 2.5 계열은 MODEL_CAPACITY_EXHAUSTED(429) 빈발. 3 preview 계열이 가장 안정적.",
     "candidates_agent": [
-      "gemini-3.1-flash-lite-preview",
-      "gemini-3.1-flash-lite",
+      "gemini-3-flash-preview",
+      "gemini-3.1-flash-preview",
       "gemini-2.5-flash"
     ],
     "candidates_verifier": [
       "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
+      "gemini-3-pro-preview",
       "gemini-2.5-pro"
     ]
   }

@@ -21,4 +21,12 @@
 ```
 
 ## Current Status
-[2026-04-23] Codex round-3 adversarial review 3개 finding을 실행 레벨까지 전부 수정. **최종 121/121 PASS** (smoke 10 + schema 6 + gemini-probe 6 + flag-combos 8 + manifest-migration 23 + sanitizer-regression 21 + ultra-selective-topology 11 + config-loading 8 + config-wired-in-exec 8 + config-fail-closed 10 + verification-wired 10). 핵심 변경: (1) Finding #1 해결 — Preamble 0.1 fail-closed 전환. mktemp 기반 secure tempfile + Python 로더 exit code 체크 + source 실패 시 abort + `_CFG_*` sanity check loop + JSON 파싱 실패 시 한글 에러. 실행 블록의 `${_CFG_*:-default}` 폴백 8곳 전부 `${_CFG_*}`로 교체. (2) Finding #2 해결 — `refs/cross-verification.md` + `refs/gemini-verification.md` 두 파일의 pinned `gemini-3.1-pro-preview` → `_pick_gemini_model verifier`, `_run_with_timeout 300 30` → `$_CFG_VERIFY_SEC`/`$_CFG_GRACE_SEC`. Gemini 모델 할당이 `_run_with_timeout` 래퍼 호출 전에 위치. (3) Finding #3 해결 — `ultra_replication()` + `ultra_replicas_for_cost()` 2-replica baseline 강제 (≤×0.7도 `["claude","codex"]`). Codex 미설치 fail-safe로 Gemini 보강. 양쪽 미설치 시 ULTRA_MODE=false 다운그레이드 + Phase 4-A-2 정규 검증. selective 5역할 9→11명 (~40% → ~25% 절감), 독립 검증 보장. (4) 회귀 smoke 2종 신규 (config-fail-closed 10 + verification-wired 10) + ultra-selective-topology 8→11 확장 (2-replica + fail-safe + 다운그레이드 분기 검증). 이전 Codex round-2 (`bb48631`+`acf6b08`) 누적.
+[2026-04-25] round-5 — **Ultra 메타 분석 4개 Critical 실행 레벨 수정**. 최종 **139/139 PASS** (신규 bash-runtime-validation 10개 + 기존 12종 유지). 핵심:
+
+(C1+C4 통합) `refs/gemini-helper.sh` 신규 — `_pick_gemini_model` + `_run_with_timeout` 단일 진실원. Preamble 0.1 cfg.env 끝에 `source gemini-helper.sh` auto-append → 모든 후속 Bash 블록이 `source cfg.env` 한 줄로 **변수+함수 둘 다** 바인딩. SKILL.md 8 + refs/*.md 3 = 11 블록에 source 가드 자동 삽입 (Python regex). bug_007이 문서에만 반영되던 근본 결함 해결.
+
+(C2) SKILL.md Phase 0.3 `_CODEMAP_RC=$?` 고아 할당 제거 — if/elif/else rc를 마지막 assignment 0이 덮어쓰던 bug_020.
+
+(C3) `tests/bash-runtime-validation.sh` 신규 — 자기충족 grep을 넘어 실제 bash subprocess로 Preamble 0.1 cross-invocation 시뮬레이션 + 함수 바인딩 + guard 커버리지 동적 검증. Ultra 메타 분석의 핵심 발견(129 PASS 자기충족 패턴) 극복.
+
+Ultra 메타 분석 산출물: `docs/team-agent/2026-04-25-012148-meta-report.md` (25KB, 64 findings + 41 ideas).

@@ -66,11 +66,14 @@ else
     fail "C3 — config override 깊이 병합 로직 미정의"
 fi
 
-# C4. _pick_gemini_model 헬퍼 정의
-if grep -q "_pick_gemini_model()" "$SKILL_MD"; then
-    pass "C4 — _pick_gemini_model 헬퍼 (alias fallback)"
+# C4. _pick_gemini_model 헬퍼 정의 (round-5 C4: refs/gemini-helper.sh로 이동)
+# SKILL.md는 시그니처만 참조, 실제 정의는 refs/gemini-helper.sh 단일 진실원
+HELPER="$SKILL_DIR/refs/gemini-helper.sh"
+if [ -f "$HELPER" ] && grep -q "^_pick_gemini_model()" "$HELPER" \
+   && grep -q "refs/gemini-helper.sh" "$SKILL_MD"; then
+    pass "C4 — _pick_gemini_model in refs/gemini-helper.sh + SKILL.md 참조"
 else
-    fail "C4 — gemini 모델 선택 헬퍼 미정의"
+    fail "C4 — gemini 모델 선택 헬퍼 미정의 or SKILL.md 참조 누락"
 fi
 
 # C5. 주요 export 변수 명시

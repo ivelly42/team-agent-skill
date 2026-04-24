@@ -76,6 +76,7 @@ suggested_severity: "Critical" | "High" | "Medium" | "Low" | "Info"
 - `/tmp/ta-${_RUN_ID}-gemini-verify-prompt.txt`
 
 ```bash
+source "$HOME/.cache/team-agent/cfg-${_RUN_ID}.env" 2>/dev/null || { echo "[team-agent] FATAL: cfg.env 없음 — Preamble 0.1 미실행" >&2; exit 1; }
 # ───────────────────────────────────────────────────────────
 # 1. 포터블 timeout 래퍼 (3단 fallback — 무한 대기 절대 금지)
 # ───────────────────────────────────────────────────────────
@@ -162,6 +163,12 @@ _CODEX_PID=$!
 # 모델: _pick_gemini_model verifier → refs/config.json candidates_verifier 우선순위 배열.
 # ───────────────────────────────────────────────────────────
 _GEMINI_VERIFIER_MODEL="$(_pick_gemini_model verifier)"
+# bug_006: 모델 탐색 실패 시 빈 문자열 + rc=1. rc 무시하면 `gemini -m ""`로 혼란스런 에러 2번 발생.
+if [ -z "$_GEMINI_VERIFIER_MODEL" ]; then
+  echo "[cross-verification] gemini verifier 모델 탐색 실패 — Gemini 검증 스킵 (codex 단독 진행)" >&2
+  echo 127 > "$_GEMINI_RC_FILE"
+  _GEMINI_PID=""
+else
 (
   if [ "${GEMINI_HAS_SCHEMA:-0}" -gt 0 ]; then
     _run_with_timeout "$_CFG_VERIFY_SEC" "$_CFG_GRACE_SEC" \
@@ -179,6 +186,7 @@ _GEMINI_VERIFIER_MODEL="$(_pick_gemini_model verifier)"
   echo $? > "$_GEMINI_RC_FILE"
 ) &
 _GEMINI_PID=$!
+fi
 
 # ───────────────────────────────────────────────────────────
 # 5. 대기 — timeout은 각 서브셸이 자체 처리. wait는 blocking-safe.

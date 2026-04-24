@@ -9,6 +9,8 @@ set -u
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CROSS_MD="$SKILL_DIR/refs/cross-verification.md"
 GEMINI_MD="$SKILL_DIR/refs/gemini-verification.md"
+# bug_018 대응: 3번째 verifier 경로 (단독 --codex 모드 + cross fallback)도 감사
+CODEX_MD="$SKILL_DIR/refs/codex-verification.md"
 RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
 PASS=0; FAIL=0
 pass() { printf "  ${GREEN}✓ PASS${NC}: %s\n" "$1"; PASS=$((PASS+1)); }
@@ -111,6 +113,25 @@ if python3 -c "import json; c=json.load(open('$CONFIG_JSON')); assert c['gemini'
     pass "V10 — refs/config.json candidates_verifier 배열 정의 존재"
 else
     fail "V10 — refs/config.json candidates_verifier 누락"
+fi
+
+# ===== bug_018 대응 — codex-verification.md 감사 =====
+# 단독 --codex 모드 (SKILL.md:2304) + --cross fallback (gemini 없음 시 codex-only)
+# 두 경로 모두 codex-verification.md를 Read해서 실행하므로 동일 config wiring 필요.
+
+# V11. codex-verification.md에 _run_with_timeout 300 30 하드코딩 0건
+CODEX_TIMEOUT=$(grep -cE '_run_with_timeout 300 30' "$CODEX_MD" || true)
+if [ "$CODEX_TIMEOUT" -eq 0 ]; then
+    pass "V11 — codex-verification.md에 하드코딩 timeout 300/30 0건 (bug_018)"
+else
+    fail "V11 — codex-verification.md timeout 하드코딩 ${CODEX_TIMEOUT}건 잔존"
+fi
+
+# V12. codex-verification.md에 $_CFG_VERIFY_SEC + $_CFG_GRACE_SEC 사용
+if grep -qE '\$_CFG_VERIFY_SEC' "$CODEX_MD" && grep -qE '\$_CFG_GRACE_SEC' "$CODEX_MD"; then
+    pass "V12 — codex-verification.md \$_CFG_VERIFY_SEC + \$_CFG_GRACE_SEC 참조"
+else
+    fail "V12 — codex-verification.md에 _CFG_ 타임아웃 변수 참조 누락 (bug_018)"
 fi
 
 echo ""

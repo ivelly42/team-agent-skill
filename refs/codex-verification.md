@@ -82,6 +82,7 @@ LLM은 `{PROJECT_DIR}`, `{TASK_PURPOSE}`, `{FINDINGS_SUMMARY}`, `{IDEAS_SUMMARY}
 2. **Bash 도구**로 codex exec를 stdin 방식으로 실행한다 — **hard timeout 필수**:
 
 ```bash
+source "$HOME/.cache/team-agent/cfg-${_RUN_ID}.env" 2>/dev/null || { echo "[team-agent] FATAL: cfg.env 없음 — Preamble 0.1 미실행" >&2; exit 1; }
 # 3-tier timeout wrapper (refs/timeout-wrapper.sh와 동일 구현, self-contained).
 # 이유: 검증 단계에서 codex CLI가 auth stall / network wedge / hang하면 전체 run 블록.
 _TIMEOUT_BIN=""
@@ -130,8 +131,9 @@ except subprocess.TimeoutExpired:
 
 _VERIFY_PROMPT="/tmp/ta-RUN_ID_VALUE-codex-verify.txt"
 
-# 검증 budget: 300s + 30s grace (cross-verification과 동일).
-_run_with_timeout 300 30 \
+# 검증 budget: $_CFG_VERIFY_SEC + $_CFG_GRACE_SEC (Preamble 0.1 bind, fail-closed 규약).
+# bug_018 수정: 이전 '300 30' 하드코딩은 사용자 config override를 조용히 무시하는 drift 원인.
+_run_with_timeout "$_CFG_VERIFY_SEC" "$_CFG_GRACE_SEC" \
   codex exec - -s read-only \
     -C "PROJECT_DIR_VALUE" \
     --skip-git-repo-check \
