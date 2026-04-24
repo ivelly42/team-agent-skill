@@ -134,8 +134,10 @@ fi
 for role in security performance testing; do
     label="M${role}"
     # JSON을 파일로 저장 (heredoc 보간 대신) — 특수문자 내부 해석 차단
+    # round-11-a Codex review: TEAM_AGENT_TEST_MODE=fixture를 명시해야만 로드 성공하는지 확인
     tmp_json="/tmp/e2e-phase1-mock-$$-${role}.json"
     "$ZSH_BIN" -c "
+export TEAM_AGENT_TEST_MODE=fixture
 source '$TEST_CFG_FILE' 2>&1 >/dev/null
 _load_fixture_for_role '$role'
 " > "$tmp_json" 2>/dev/null
@@ -187,6 +189,7 @@ done
 echo ""
 echo "── M6. 경로 순회 방어 (role='../../../etc/passwd')"
 m6_out=$("$ZSH_BIN" -c "
+export TEAM_AGENT_TEST_MODE=fixture
 source '$TEST_CFG_FILE' 2>&1 >/dev/null
 _load_fixture_for_role '../../etc/passwd' 2>&1
 echo 'rc='\$?
@@ -206,6 +209,7 @@ fi
 echo ""
 echo "── M7. 존재하지 않는 role → fail-closed"
 m7_out=$("$ZSH_BIN" -c "
+export TEAM_AGENT_TEST_MODE=fixture
 source '$TEST_CFG_FILE' 2>&1 >/dev/null
 _load_fixture_for_role 'nonexistent-role' 2>&1
 echo 'rc='\$?
@@ -217,6 +221,50 @@ else
     echo "   ${RED}[FAIL M7]${NC} 미존재 role 처리 실패"
     FAIL=$((FAIL+1))
     FAIL_LOG+=("M7: $m7_out")
+fi
+
+# ---------------------------------------------------------
+# M8. round-11-a Codex review 핵심: env off → 유효한 role도 거부 (mock gating 강제)
+# 이 케이스가 없으면 기존 테스트가 gating 없이도 pass 가능 → test self-fulfillment 재발.
+# _load_fixture_for_role가 TEAM_AGENT_TEST_MODE 미확인이면 프로덕션 실수 호출 시 fixture 주입됨.
+# ---------------------------------------------------------
+echo ""
+echo "── M8. env var 미설정 → 유효 role도 차단 (프로덕션 실수 방지)"
+m8_out=$("$ZSH_BIN" -c "
+# TEAM_AGENT_TEST_MODE 명시 unset (source cfg.env가 건드리지 않지만 방어)
+unset TEAM_AGENT_TEST_MODE
+source '$TEST_CFG_FILE' 2>&1 >/dev/null
+_load_fixture_for_role 'security' 2>&1
+echo 'rc='\$?
+")
+if echo "$m8_out" | grep -q 'FATAL.*TEAM_AGENT_TEST_MODE=fixture' && echo "$m8_out" | grep -q 'rc=1'; then
+    echo "   ${GREEN}[PASS M8]${NC} env 미설정 시 유효 role도 거부 — mock gating 강제"
+    PASS=$((PASS+1))
+else
+    echo "   ${RED}[FAIL M8]${NC} mock gating 없음 — test self-fulfillment 재발 위험"
+    echo "      실제 출력: $(printf '%s' "$m8_out" | head -c 150)"
+    FAIL=$((FAIL+1))
+    FAIL_LOG+=("M8: $m8_out")
+fi
+
+# ---------------------------------------------------------
+# M9. TEAM_AGENT_TEST_MODE=fixture 외 다른 값 → 거부 (오타 방어)
+# ---------------------------------------------------------
+echo ""
+echo "── M9. env var='mock'/'test'/'1' 등 다른 값 → 거부"
+m9_out=$("$ZSH_BIN" -c "
+export TEAM_AGENT_TEST_MODE=mock
+source '$TEST_CFG_FILE' 2>&1 >/dev/null
+_load_fixture_for_role 'security' 2>&1
+echo 'rc='\$?
+")
+if echo "$m9_out" | grep -q 'FATAL.*TEAM_AGENT_TEST_MODE=fixture' && echo "$m9_out" | grep -q 'rc=1'; then
+    echo "   ${GREEN}[PASS M9]${NC} 'fixture' 외 값은 거부 (엄격 매칭)"
+    PASS=$((PASS+1))
+else
+    echo "   ${RED}[FAIL M9]${NC} 엄격 매칭 실패 — 오타 방어 안 됨"
+    FAIL=$((FAIL+1))
+    FAIL_LOG+=("M9: $m9_out")
 fi
 
 echo ""

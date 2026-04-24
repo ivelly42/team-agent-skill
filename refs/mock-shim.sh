@@ -26,6 +26,14 @@
 # 보안: role 인자에 경로 순회(..) 차단. 영숫자+하이픈만 허용.
 # ==========================================================================
 _load_fixture_for_role() {
+    # round-11-a Codex review: mock 경로는 TEAM_AGENT_TEST_MODE=fixture에서만 활성화돼야 함.
+    # 이 가드가 없으면 프로덕션에서 실수로 호출 시 fixture가 실제 에이전트 결과처럼 주입되어
+    # 사용자가 fixture 데이터를 진짜 분석 결과로 오인할 위험. fail-closed로 원천 차단.
+    if [ "${TEAM_AGENT_TEST_MODE:-}" != "fixture" ]; then
+        echo "[mock-shim] FATAL: TEAM_AGENT_TEST_MODE=fixture 미설정 — mock 경로 차단 (프로덕션에서 실수 호출 방지)" >&2
+        return 1
+    fi
+
     local _role="${1:-}"
     if [ -z "$_role" ]; then
         echo "[mock-shim] FATAL: role 인자 누락" >&2
