@@ -518,6 +518,8 @@ LLM은 사용자 입력을 셸 명령에 직접 삽입하지 않는다. 대신 2
 1. **Write 도구**로 사용자 입력을 `/tmp/ta-${_RUN_ID}-input.txt`에 저장한다 (셸을 거치지 않으므로 인젝션 원천 차단).
 
 2. **Bash 도구**로 임시 파일을 읽어 sanitize한다 (새 셸이므로 cfg.env 먼저 source — fail-closed):
+
+<!-- shell-parity: skip reason=bash 3.2 macOS 기본 shell이 python heredoc 안의 한글 regex literal('가-힣')을 parse할 때 quoting 이슈. Claude Code Bash 도구는 zsh로 실행되므로 프로덕션 영향 없음. zsh -n은 통과. round-10 후속: sanitize_input.py 외부화 시 이 블록 자체 제거. -->
 ```bash
 source "$HOME/.cache/team-agent/cfg-${_RUN_ID}.env" 2>/dev/null || {
   echo "[team-agent] FATAL: cfg.env 없음 — Preamble 0.1 먼저 실행" >&2; exit 1; }

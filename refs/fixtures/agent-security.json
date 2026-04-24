@@ -1,0 +1,54 @@
+{
+  "findings": [
+    {
+      "severity": "High",
+      "title": "SQL injection via unsanitized user input in search endpoint",
+      "file": "src/api/search.py",
+      "line_start": 42,
+      "line_end": 48,
+      "code_snippet": "query = f\"SELECT * FROM products WHERE name LIKE '%{user_input}%'\"\ncursor.execute(query)",
+      "evidence": "user_input is taken from request.args without any sanitization or parameterization; attacker can inject OR 1=1 to dump entire table.",
+      "confidence": "high",
+      "action": "Use parameterized query: cursor.execute('SELECT * FROM products WHERE name LIKE %s', (f'%{user_input}%',))",
+      "category": "security"
+    },
+    {
+      "severity": "Critical",
+      "title": "Hardcoded API key committed to repository",
+      "file": "src/config.py",
+      "line_start": 12,
+      "line_end": 12,
+      "code_snippet": "STRIPE_SECRET_KEY = \"sk_live_REDACTED_FIXTURE_ONLY\"",
+      "evidence": "The key appears to be live per naming convention; once published to a public repo, rotation is mandatory.",
+      "confidence": "high",
+      "action": "Rotate key via Stripe dashboard, move to environment variable, add src/config.py key pattern to pre-commit hook (detect-secrets).",
+      "category": "security"
+    },
+    {
+      "severity": "Medium",
+      "title": "JWT signature verification disabled in auth middleware",
+      "file": "src/middleware/auth.py",
+      "line_start": 88,
+      "line_end": 94,
+      "code_snippet": "payload = jwt.decode(token, options={\"verify_signature\": False})",
+      "evidence": "Signature verification is explicitly disabled; any attacker can forge a token with arbitrary claims.",
+      "confidence": "high",
+      "action": "Remove the options dict; pass public key/secret and algorithms=['RS256'] explicitly.",
+      "category": "security"
+    }
+  ],
+  "ideas": [
+    {
+      "title": "Adopt bandit + semgrep in CI for static security scanning",
+      "difficulty": "low",
+      "impact": "high",
+      "detail": "Run bandit on every PR for Python codebase + semgrep with community rulesets. Fails CI on Medium+. Catches ~80% of OWASP Top 10 drift before it hits main."
+    },
+    {
+      "title": "Introduce rate limiting on auth endpoints",
+      "difficulty": "medium",
+      "impact": "medium",
+      "detail": "Currently /login accepts unlimited requests. Redis-backed token bucket per IP (5 req/min) reduces credential stuffing exposure. Use Flask-Limiter or similar."
+    }
+  ]
+}

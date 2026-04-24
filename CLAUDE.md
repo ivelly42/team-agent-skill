@@ -21,23 +21,25 @@
 ```
 
 ## Current Status
-[2026-04-25] round-9 — **Codex 5.5 xhigh 제안 적용: timeout wrapper 7곳 인라인 복제 제거 + `_require_cfg` 계약 검증 함수** 완료. 최종 **13 test suite 전체 PASS** (R31·R32 신규 2개 + smoke Test 9 재작성).
+[2026-04-25] round-10 — **test self-fulfillment 탈출** 완료. 최종 **16 test suite 전체 PASS** (shell-parity + e2e-preamble + e2e-agent-fixture 3종 신규 + fixture 3개 JSON).
 
-핵심 (라운드-9, 3명 합의 이슈 중 1건):
-- **(C1 HIGH)** `_run_with_timeout` 40줄 함수가 SKILL.md 4곳 + refs/{codex,gemini,cross}-verification.md 3곳 = **총 7곳 인라인 복붙** 제거. `refs/gemini-helper.sh`가 이미 `export -f`하므로 `source cfg.env` 한 줄로 자동 바인딩되는 단일 진실원 구조 확립. Codex 5.5 xhigh가 round-9 제안 문서에서 패치까지 설계.
-- **신규: `_require_cfg` 함수** `refs/gemini-helper.sh`에 추가 — 26개 `_CFG_*` 변수 + 3개 함수(`_run_with_timeout`/`_pick_gemini_model`/`_require_cfg`) 바인딩 일괄 검증. cfg.env 말미에 자동 호출 → 계약 위반 즉시 fail-closed.
-- **`export -f` zsh 호환 가드**: `if [ -n "${BASH_VERSION:-}" ]; then export -f ...; fi` — zsh에서 `export -f`는 bash와 다른 의미라 조건부로 유지.
-- **smoke Test 9 재작성**: 이전엔 "7곳 인라인이 canonical과 SHA256 일치" 검증 (증상 관리). 이제 "helper 3 함수 단일 소유 + runtime 4 파일 인라인 0건" (원인 해결 검증).
-- **R10 패턴 확장**: cfg.env append가 `{printf source; printf _require_cfg}` 그룹 형태 허용.
-- **신규 R31**: grep으로 _require_cfg 존재 + 7곳 인라인 잔존 0건 검증.
-- **신규 R32**: zsh subprocess에서 helper.sh source 후 3 함수 전부 바인딩 실제 실행 검증 (R30 패턴 확장).
+왜 필요했는가:
+- round-8 HS8(bash-only `${!var}` → zsh bad substitution)이 **테스트 159개 PASS 상태에서 프로덕션 `/team-agent --ultra --dry-run`에서 폭발**. 기존 테스트가 전부 grep 기반 + `bash` 명시 실행이라 zsh parse 문제를 원천적으로 못 잡음. "테스트가 자기 자신만 검증하는" 구조적 결함이 round-9에서 3인 합의로 식별됨.
 
-보류 (round-10 예정, 2건 3-agent 합의 남음):
+신규 테스트 3종 (runtime parity 확보):
+- **`tests/shell-parity.sh`** — SKILL.md + refs/*.md의 모든 ```bash 블록을 `bash -n` + `zsh -n` 양쪽 parse check. 31/32 PASS, 1 skip (bash 3.2 Korean regex — zsh에선 OK, Claude Code가 zsh라 의도적 skip 주석). `<!-- shell-parity: skip reason=... -->` 주석으로 의도적 제외 명시.
+- **`tests/e2e-preamble.sh`** — zsh subprocess에서 helper.sh + cfg.env 계약 + 5개 hostile TASK_PURPOSE(`'; rm -rf \"$HOME\"`, em dash 구분자 위장, ANSI escape, PYEOF heredoc 탈출, `$(whoami)` command substitution) **실제 실행**. 8/8 PASS. `_require_cfg` fail-closed도 subshell 래핑으로 검증.
+- **`tests/e2e-agent-fixture.sh`** — `refs/fixtures/agent-{security,performance,testing}.json`을 `refs/output-schema.json`으로 jsonschema validate + secret pattern leak 검사. 3/3 PASS. 향후 TEAM_AGENT_TEST_MODE=fixture mock shim 기반 확보.
+
+지원 파일:
+- **`tests/_sanitizer_shim.py`** — Step 1-2 sanitizer Python 단일 파일 shim (stdin → sanitized stdout). e2e + regression 공용.
+- **`refs/fixtures/agent-{security,performance,testing}.json`** — output-schema.json 준수 3개 대표 역할 fixture (findings 2-3건 + ideas 2건씩).
+
+보류 (round-11 예정, 더 큰 리팩터):
 - SKILL.md 2674줄 분할 (Codex가 refs/phases/*.md 16파일 분할안 제시) — 큰 리팩터, 별도 round
-- 테스트 self-fulfillment 탈출 (shell-parity.sh + e2e-preamble.sh + Agent fixture mock) — 별도 round
+- Agent 실제 Mock shim 구현 (지금은 fixture 자체 validate만, Phase 1 실제 Agent 호출 대체는 후속)
 
-round-9 메타 분석 산출물: `docs/team-agent/2026-04-25-040151-meta-ultra-report.md` (13KB)
-round-9 Codex 제안 원본: `/tmp/ta-round9-codex-proposal.md` (285줄, ~9.5KB)
+round-9 산출물 유지: `docs/team-agent/2026-04-25-040151-meta-ultra-report.md` (13KB), `docs/team-agent/adversarial-reviews/2026-04-25-codex-round-9-proposal.md` (285줄)
 
 핵심 (라운드-8, 공격 벡터 15개 중 수정 완료 9개):
 - **(C1 CRITICAL)** Ultra consolidator schema 삼위일체 drift 해소 — prompt에서 `replicas` 금지, example에 `status` 필수 추가, schema·prompt·example 3곳 동기화.

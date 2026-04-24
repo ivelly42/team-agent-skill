@@ -1,0 +1,42 @@
+{
+  "findings": [
+    {
+      "severity": "High",
+      "title": "N+1 query on order list endpoint (fetches customer per row)",
+      "file": "src/api/orders.py",
+      "line_start": 120,
+      "line_end": 135,
+      "code_snippet": "orders = Order.query.all()\nfor o in orders:\n    o.customer_name = Customer.query.get(o.customer_id).name",
+      "evidence": "Each order triggers a separate SELECT on customers. With 1000 orders: 1001 queries, ~2.5s p50 in staging.",
+      "confidence": "high",
+      "action": "Use SQLAlchemy joinedload: Order.query.options(joinedload(Order.customer)).all() — single query, 10-15x speedup.",
+      "category": "performance"
+    },
+    {
+      "severity": "Medium",
+      "title": "No response compression on /api responses",
+      "file": "src/app.py",
+      "line_start": 24,
+      "line_end": 28,
+      "code_snippet": "app = Flask(__name__)\n# TODO: add CORS\nCORS(app)",
+      "evidence": "Large JSON responses (1-5MB for reports endpoint) ship uncompressed. gzip would cut payload to ~15%.",
+      "confidence": "medium",
+      "action": "Add flask-compress middleware with gzip + brotli. Verify with curl -I -H 'Accept-Encoding: gzip'.",
+      "category": "performance"
+    }
+  ],
+  "ideas": [
+    {
+      "title": "Introduce request-level caching with Redis for /dashboard/summary",
+      "difficulty": "medium",
+      "impact": "high",
+      "detail": "Dashboard aggregates 12 queries per load, p95 = 1.8s. 60s TTL cache keyed by user_id + day would drop it to <50ms for >95% of hits."
+    },
+    {
+      "title": "Profile with py-spy in production and add latency histograms",
+      "difficulty": "low",
+      "impact": "medium",
+      "detail": "py-spy --pid + prometheus_client.Histogram on top 10 endpoints. Surfaces regression signatures before users notice."
+    }
+  ]
+}

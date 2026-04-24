@@ -1,0 +1,42 @@
+{
+  "findings": [
+    {
+      "severity": "Medium",
+      "title": "No tests for payment refund path",
+      "file": "tests/test_payments.py",
+      "line_start": 1,
+      "line_end": 1,
+      "code_snippet": "# No test exists — src/payments/refund.py is 0% covered",
+      "evidence": "pytest --cov shows refund.py 0/74 lines covered. A regression here causes real customer money loss. Critical path should be at ≥80%.",
+      "confidence": "high",
+      "action": "Add integration test refund_succeeds_within_90_days + refund_rejected_after_90_days using Stripe test mode.",
+      "category": "testing"
+    },
+    {
+      "severity": "Low",
+      "title": "Flaky test due to system clock dependency",
+      "file": "tests/test_scheduler.py",
+      "line_start": 55,
+      "line_end": 72,
+      "code_snippet": "def test_runs_at_midnight():\n    now = datetime.now()\n    assert scheduler.should_run() == (now.hour == 0)",
+      "evidence": "Test relies on real wall clock — passes only between 00:00-00:59 UTC. CI fails ~96% of runs depending on schedule.",
+      "confidence": "high",
+      "action": "Use freezegun: @freeze_time('2026-01-01 00:30:00') to deterministically control time.",
+      "category": "testing"
+    }
+  ],
+  "ideas": [
+    {
+      "title": "Add mutation testing with mutmut to detect weak assertions",
+      "difficulty": "medium",
+      "impact": "medium",
+      "detail": "Current coverage is 78% but mutation score likely <40%. mutmut run on src/ surfaces tests that pass with broken code — forces stronger assertions where they matter."
+    },
+    {
+      "title": "Replace hand-rolled fixtures with factory-boy for model instances",
+      "difficulty": "low",
+      "impact": "medium",
+      "detail": "Current conftest has 400 lines of setup code with repeated patterns. factory-boy cuts boilerplate by ~70% and makes test intent clearer."
+    }
+  ]
+}
