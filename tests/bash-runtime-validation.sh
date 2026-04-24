@@ -187,13 +187,16 @@ else
 fi
 
 # =========================================================================
-# R10. cfg.env가 helper source 라인을 append하도록 지시하는지 (Preamble 0.1)
+# R10. cfg.env가 helper source 라인 + _require_cfg 호출을 append하도록 지시하는지 (Preamble 0.1)
+# round-9 C1: 인라인 `printf 'source %q'` → `{ printf 'source %q'; printf '_require_cfg\n' } >> cfg`
+# 그룹 형태도 허용. _require_cfg 자체도 포함되는지 검증.
 # =========================================================================
-if grep -q 'printf .source %q.*>> "\$_TA_CFG_FILE"' "$SKILL_DIR/SKILL.md" \
-   || grep -q 'printf .source %q.*_TA_CFG_FILE' "$SKILL_DIR/SKILL.md"; then
-    pass "R10 — Preamble 0.1이 cfg.env에 helper source 라인 append"
+if (grep -q 'printf .source %q.*_TA_CFG_FILE' "$SKILL_DIR/SKILL.md" \
+    || grep -qE "printf 'source %q" "$SKILL_DIR/SKILL.md") \
+   && grep -q "_require_cfg" "$SKILL_DIR/SKILL.md"; then
+    pass "R10 — Preamble 0.1이 cfg.env에 helper source + _require_cfg append"
 else
-    fail "R10 — Preamble 0.1에서 helper source 라인 append 지시 누락"
+    fail "R10 — Preamble 0.1에서 helper source 또는 _require_cfg append 지시 누락"
 fi
 
 # =========================================================================
@@ -435,6 +438,36 @@ if [ "$_R30_OUT" = "OK" ]; then
     pass "R30 — round-8 HS8 (zsh 실제 실행): eval indirect expansion 패턴 zsh 호환"
 else
     fail "R30 — round-8 HS8: zsh 실행 실패 — eval indirect 패턴이 zsh 호환되지 않음: $_R30_OUT"
+fi
+
+# =========================================================================
+# R31. round-9 C1: gemini-helper.sh가 _require_cfg 함수 제공 + SKILL.md 인라인 제거
+# =========================================================================
+if grep -q '^_require_cfg()' "$SKILL_DIR/refs/gemini-helper.sh" \
+   && ! grep -qE '^_TIMEOUT_BIN=""$' "$SKILL_DIR/SKILL.md" \
+   && ! grep -qE '^_TIMEOUT_BIN=""$' "$SKILL_DIR/refs/codex-verification.md" \
+   && ! grep -qE '^_TIMEOUT_BIN=""$' "$SKILL_DIR/refs/gemini-verification.md" \
+   && ! grep -qE '^_TIMEOUT_BIN=""$' "$SKILL_DIR/refs/cross-verification.md"; then
+    pass "R31 — round-9 C1: gemini-helper.sh에 _require_cfg 추가 + SKILL.md·refs 4곳 인라인 제거"
+else
+    fail "R31 — round-9 C1: _require_cfg 누락 또는 7곳 인라인 timeout wrapper 잔존"
+fi
+
+# =========================================================================
+# R32. round-9 C1 (zsh 실제 실행): cfg.env source → _run_with_timeout + _require_cfg 함수 바인딩
+# 실제 zsh subprocess에서 helper.sh만 source해서 함수가 type으로 보이는지 검증.
+# =========================================================================
+_R32_OUT=$(zsh -c "
+  source \"$SKILL_DIR/refs/gemini-helper.sh\" 2>/dev/null
+  type _run_with_timeout >/dev/null 2>&1 || { echo 'FAIL: _run_with_timeout missing'; exit 1; }
+  type _pick_gemini_model >/dev/null 2>&1 || { echo 'FAIL: _pick_gemini_model missing'; exit 1; }
+  type _require_cfg >/dev/null 2>&1 || { echo 'FAIL: _require_cfg missing'; exit 1; }
+  echo OK
+" 2>&1)
+if [ "$_R32_OUT" = "OK" ]; then
+    pass "R32 — round-9 C1 (zsh 실제 실행): helper.sh source 후 3 함수 전부 바인딩"
+else
+    fail "R32 — round-9 C1: zsh에서 helper 함수 바인딩 실패: $_R32_OUT"
 fi
 
 echo ""

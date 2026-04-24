@@ -83,51 +83,7 @@ LLM은 `{PROJECT_DIR}`, `{TASK_PURPOSE}`, `{FINDINGS_SUMMARY}`, `{IDEAS_SUMMARY}
 
 ```bash
 source "$HOME/.cache/team-agent/cfg-${_RUN_ID}.env" 2>/dev/null || { echo "[team-agent] FATAL: cfg.env 없음 — Preamble 0.1 미실행" >&2; exit 1; }
-# 3-tier timeout wrapper (refs/timeout-wrapper.sh와 동일 구현, self-contained).
-# 이유: 검증 단계에서 codex CLI가 auth stall / network wedge / hang하면 전체 run 블록.
-_TIMEOUT_BIN=""
-if command -v timeout >/dev/null 2>&1; then
-    _TIMEOUT_BIN="timeout"
-elif command -v gtimeout >/dev/null 2>&1; then
-    _TIMEOUT_BIN="gtimeout"
-fi
-
-_run_with_timeout() {
-    # $1=secs, $2=grace_secs, $@=cmd...
-    local _secs="$1"; shift
-    local _grace="$1"; shift
-    if [ -n "$_TIMEOUT_BIN" ]; then
-        "$_TIMEOUT_BIN" -k "$_grace" "$_secs" "$@"
-        return $?
-    fi
-    # Python watchdog fallback — `python3 -c` with argv preserves child stdin.
-    # heredoc은 절대 사용하지 말 것: fd 0을 heredoc 바이트로 대체하여 child가
-    # prompt 대신 EOF를 받는 silent failure 발생.
-    python3 -c '
-import os, signal, subprocess, sys
-secs = int(sys.argv[1]); grace = int(sys.argv[2]); cmd = sys.argv[3:]
-if not cmd:
-    print("[team-agent] _run_with_timeout: empty cmd", file=sys.stderr); sys.exit(2)
-try:
-    p = subprocess.Popen(cmd, start_new_session=True, stdin=sys.stdin)
-except FileNotFoundError as e:
-    print(f"[team-agent] cmd not found: {e}", file=sys.stderr); sys.exit(127)
-try:
-    sys.exit(p.wait(timeout=secs))
-except subprocess.TimeoutExpired:
-    try: os.killpg(p.pid, signal.SIGTERM)
-    except ProcessLookupError: pass
-    try:
-        p.wait(timeout=grace)
-    except subprocess.TimeoutExpired:
-        try: os.killpg(p.pid, signal.SIGKILL)
-        except ProcessLookupError: pass
-        p.wait()
-        sys.exit(137)
-    sys.exit(124)
-' "$_secs" "$_grace" "$@"
-    return $?
-}
+# round-9 C1: _run_with_timeout은 cfg.env가 load한 refs/gemini-helper.sh에서 제공.
 
 _VERIFY_PROMPT="/tmp/ta-RUN_ID_VALUE-codex-verify.txt"
 

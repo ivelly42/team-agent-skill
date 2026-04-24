@@ -552,149 +552,63 @@ PYEOF
 }
 
 # ───────────────────────────────────────────────────────────
-# Test 9: canonical wrapper 전체(preamble + function) byte-exact parity
-# Codex 10차 [medium] 해결: Python body만 비교하던 것을 shell-side
-# (`_TIMEOUT_BIN` 선택 / argument plumbing / return handling / function 구조)
-# 까지 포함한 full block byte-exact 비교로 확장.
+# Test 9: round-9 C1 — 인라인 wrapper 0건 + helper 단일 진실원 검증
+# 이전: 7곳 인라인 복붙을 SHA256 pin으로 drift 감지 (증상 관리).
+# 현재: helper(gemini-helper.sh)가 _run_with_timeout + _pick_gemini_model + _require_cfg를
+#       유일하게 정의하고, runtime 파일(SKILL.md + refs/*-verification.md)엔 0건이어야 한다.
 # ───────────────────────────────────────────────────────────
-# 현재 canonical full-block SHA256. 값이 바뀌면 의도된 wrapper 변경이므로 반드시
-# 테스트에서 업데이트. 바꾸는 커밋은 의도적 canonical 리팩터여야 한다.
-EXPECTED_CANONICAL_SHA256="5c0c6d2c9e8449f5249bd01cc9a48582412c2465519f1c292913a8873a6cc930"
 test_timeout_wrapper_parity() {
-    local name="canonical ↔ 인라인 wrapper full-block byte-exact parity"
-    local canonical="$SKILL_DIR/refs/timeout-wrapper.sh"
-    local inlines=("$SKILL_DIR/SKILL.md" "$SKILL_DIR/refs/codex-verification.md" \
+    local name="round-9 C1: helper 단일 소유 + runtime 파일 인라인 0건"
+    local helper="$SKILL_DIR/refs/gemini-helper.sh"
+    local runtimes=("$SKILL_DIR/SKILL.md" "$SKILL_DIR/refs/codex-verification.md" \
                    "$SKILL_DIR/refs/cross-verification.md" "$SKILL_DIR/refs/gemini-verification.md")
 
-    python3 - "$EXPECTED_CANONICAL_SHA256" "$canonical" "${inlines[@]}" <<'PYEOF'
-import hashlib, re, sys
-expected_hash = sys.argv[1]
-canonical_path = sys.argv[2]
-inline_paths = sys.argv[3:]
-
-# 각 파일별 반드시 존재해야 할 wrapper block 개수. 누락/추가 = violation.
-EXPECTED_COUNTS = {
-    'SKILL.md': 4,
-    'refs/codex-verification.md': 1,
-    'refs/cross-verification.md': 1,
-    'refs/gemini-verification.md': 1,
-}
-EXPECTED_TOTAL = sum(EXPECTED_COUNTS.values())  # 7
-
-def extract_wrapper_blocks(text):
-    """`_TIMEOUT_BIN=""` 부터 `_run_with_timeout() { ... }` closing `}` 까지
-    전체 wrapper block을 추출 (중첩 brace 정확히 매칭)."""
-    blocks = []
-    pos = 0
-    while pos < len(text):
-        m = re.search(r'^_TIMEOUT_BIN=""', text[pos:], re.MULTILINE)
-        if not m:
-            break
-        block_start = pos + m.start()
-        fn_m = re.search(r'_run_with_timeout\(\)\s*\{', text[block_start:])
-        if not fn_m:
-            pos = block_start + len(m.group())
-            continue
-        body_start = block_start + fn_m.end()
-        depth = 1
-        i = body_start
-        while i < len(text) and depth > 0:
-            c = text[i]
-            if c == '{': depth += 1
-            elif c == '}': depth -= 1
-            if depth == 0: break
-            i += 1
-        if depth != 0:
-            pos = body_start
-            continue
-        block_end = i + 1  # closing } 포함
-        blocks.append(text[block_start:block_end])
-        pos = block_end
-    return blocks
-
-try:
-    with open(canonical_path, encoding='utf-8') as f:
-        canonical_text = f.read()
-except FileNotFoundError:
-    print(f"FATAL: canonical missing: {canonical_path}", file=sys.stderr); sys.exit(2)
-
-canonical_blocks = extract_wrapper_blocks(canonical_text)
-if not canonical_blocks:
-    print(f"FATAL: canonical has no _run_with_timeout block: {canonical_path}", file=sys.stderr); sys.exit(2)
-canonical_block = canonical_blocks[0]
-canonical_hash = hashlib.sha256(canonical_block.encode()).hexdigest()
-
-# (1) canonical hash가 pinned 값과 일치해야 함 (coordinated drift 방지)
-if canonical_hash != expected_hash:
-    print(f"FATAL: canonical hash drift", file=sys.stderr)
-    print(f"  expected: {expected_hash}", file=sys.stderr)
-    print(f"  actual:   {canonical_hash}", file=sys.stderr)
-    print(f"  canonical file: {canonical_path}", file=sys.stderr)
-    print(f"  → 의도적 wrapper 변경이면 EXPECTED_CANONICAL_SHA256를 새 값으로 업데이트", file=sys.stderr)
-    sys.exit(1)
-
-def rel_key(path):
-    parts = path.split('/')
-    if 'refs' in parts:
-        idx = parts.index('refs')
-        return '/'.join(parts[idx:])
-    return parts[-1]
+    python3 - "$helper" "${runtimes[@]}" <<'PYEOF'
+import re, sys
+helper_path = sys.argv[1]
+runtime_paths = sys.argv[2:]
 
 violations = []
-actual_counts = {}
-for path in inline_paths:
-    rel = rel_key(path)
+
+# (1) helper에 _run_with_timeout + _pick_gemini_model + _require_cfg 3 함수 정의 존재
+try:
+    with open(helper_path, encoding='utf-8') as f:
+        helper_text = f.read()
+except FileNotFoundError:
+    print(f"FATAL: helper missing: {helper_path}", file=sys.stderr); sys.exit(2)
+
+for fn in ("_run_with_timeout", "_pick_gemini_model", "_require_cfg"):
+    if not re.search(rf'^{fn}\(\)\s*\{{', helper_text, re.MULTILINE):
+        violations.append(f"helper({helper_path}): {fn}() 정의 누락")
+
+# (2) runtime 파일에 _TIMEOUT_BIN=""  ≡ 인라인 wrapper 0건
+for path in runtime_paths:
     try:
         with open(path, encoding='utf-8') as f:
             text = f.read()
     except FileNotFoundError:
-        violations.append(f"{rel}: file missing"); actual_counts[rel] = 0; continue
-    blocks = extract_wrapper_blocks(text)
-    actual_counts[rel] = len(blocks)
-    for idx, block in enumerate(blocks, 1):
-        if block != canonical_block:
-            block_hash = hashlib.sha256(block.encode()).hexdigest()[:12]
-            clines = canonical_block.splitlines()
-            blines = block.splitlines()
-            diffs = []
-            for i in range(max(len(clines), len(blines))):
-                c = clines[i] if i < len(clines) else '<EOF>'
-                b = blines[i] if i < len(blines) else '<EOF>'
-                if c != b:
-                    diffs.append(f"    L{i+1}: canonical={c!r} inline={b!r}")
-                    if len(diffs) >= 5:
-                        break
-            violations.append(
-                f"{rel} block#{idx}: hash={block_hash} drift vs canonical\n" + '\n'.join(diffs)
-            )
-
-# (2) per-file count 검증
-for expected_rel, expected_n in EXPECTED_COUNTS.items():
-    got = actual_counts.get(expected_rel, 0)
-    if got != expected_n:
-        violations.append(
-            f"{expected_rel}: expected exactly {expected_n} wrapper block(s), got {got}"
-        )
-
-# (3) total count 검증
-total = sum(actual_counts.values())
-if total != EXPECTED_TOTAL:
-    violations.append(f"total: expected {EXPECTED_TOTAL} wrapper blocks, got {total}")
+        violations.append(f"{path}: file missing"); continue
+    # runtime 파일엔 inline `_TIMEOUT_BIN=""` 금지 (helper만 소유)
+    if re.search(r'^_TIMEOUT_BIN=""$', text, re.MULTILINE):
+        n = len(re.findall(r'^_TIMEOUT_BIN=""$', text, re.MULTILINE))
+        violations.append(f"{path}: inline _TIMEOUT_BIN 정의 {n}개 발견 (helper로 이관 필요)")
+    # runtime 파일엔 inline `_run_with_timeout() {` 금지
+    if re.search(r'^_run_with_timeout\(\)\s*\{', text, re.MULTILINE):
+        n = len(re.findall(r'^_run_with_timeout\(\)\s*\{', text, re.MULTILINE))
+        violations.append(f"{path}: inline _run_with_timeout() 정의 {n}개 발견 (helper로 이관 필요)")
 
 if violations:
-    print(f"[test_9] canonical pinned hash: {expected_hash[:12]}... OK", file=sys.stderr)
     print(f"[test_9] {len(violations)} violation(s):", file=sys.stderr)
-    for v in violations: print(v, file=sys.stderr)
+    for v in violations: print(f"  - {v}", file=sys.stderr)
     sys.exit(1)
-print(f"[test_9] canonical full-block hash pinned at {expected_hash[:12]}...")
-print(f"[test_9] all {total} inline wrapper blocks byte-equal across {len(EXPECTED_COUNTS)} files")
+print(f"[test_9] helper({helper_path.rsplit('/', 1)[-1]})가 3 함수 단일 소유, runtime 파일 {len(runtime_paths)}개 모두 인라인 0건")
 sys.exit(0)
 PYEOF
     local rc=$?
     if [ "$rc" = "0" ]; then
         _pass "$name"
     else
-        _fail "$name" "pinned-parity violations above"
+        _fail "$name" "helper 단일 소유 계약 위반 (위 참조)"
     fi
 }
 

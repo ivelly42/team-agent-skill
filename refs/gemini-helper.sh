@@ -62,7 +62,41 @@ except subprocess.TimeoutExpired:
 ' "$_secs" "$_grace" "$@"
     return $?
 }
-export -f _run_with_timeout
+if [ -n "${BASH_VERSION:-}" ]; then export -f _run_with_timeout; fi
+
+# ==========================================================================
+# _require_cfg — cfg.env source 계약 검증 (round-9 C1: 중복 인라인 wrapper 제거)
+# 모든 실행 Bash 블록은 `source cfg.env`만 해도 helper 함수 + _CFG_* 바인딩.
+# 이 함수는 바인딩이 실제로 성공했는지 일괄 확인. fail-closed로 exit 1.
+# zsh/bash 공통 — eval indirect expansion (HS8 패턴).
+# ==========================================================================
+_require_cfg() {
+    local _missing=0 _var _val _fn
+    for _var in \
+        _CFG_AGENT_SOFT_SEC _CFG_VERIFY_SEC _CFG_CODEMAP_SEC _CFG_GRACE_SEC \
+        _CFG_TASK_PURPOSE_CHARS _CFG_PROJECT_CONTEXT_CHARS _CFG_ROLE_FILTERED_CHARS \
+        _CFG_CONSOLIDATOR_CHARS _CFG_VERIFY_CAP \
+        _CFG_WEIGHT_PRECISE _CFG_WEIGHT_STRUCTURE _CFG_WEIGHT_DOCS _CFG_WEIGHT_EXPLORE \
+        _CFG_OVERHEAD_CODEX _CFG_OVERHEAD_GEMINI _CFG_OVERHEAD_OPUS \
+        _CFG_BATCH_SMALL _CFG_BATCH_LARGE _CFG_BATCH_SLEEP_SEC \
+        _CFG_GEMINI_AGENT_CANDIDATES _CFG_GEMINI_VERIFIER_CANDIDATES \
+        _CFG_CODEX_AGENT_MODEL _CFG_CODEX_VERIFIER_MODEL \
+        _CFG_CODEX_REASONING_AGENT _CFG_CODEX_REASONING_VERIFIER; do
+        eval "_val=\"\${$_var:-}\""
+        if [ -z "$_val" ]; then
+            echo "[team-agent] FATAL: $_var 미바인딩 — cfg.env source 계약 위반" >&2
+            _missing=1
+        fi
+    done
+    for _fn in _run_with_timeout _pick_gemini_model; do
+        type "$_fn" >/dev/null 2>&1 || {
+            echo "[team-agent] FATAL: $_fn 함수 미바인딩 — gemini-helper.sh source 실패" >&2
+            _missing=1
+        }
+    done
+    [ "$_missing" -eq 0 ] || exit 1
+}
+if [ -n "${BASH_VERSION:-}" ]; then export -f _require_cfg; fi
 
 # ==========================================================================
 # _pick_gemini_model — gemini candidates 배열에서 가용한 첫 모델 선택
@@ -106,4 +140,4 @@ _pick_gemini_model() {
     printf ''
     return 1
 }
-export -f _pick_gemini_model
+if [ -n "${BASH_VERSION:-}" ]; then export -f _pick_gemini_model; fi

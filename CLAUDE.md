@@ -21,7 +21,23 @@
 ```
 
 ## Current Status
-[2026-04-25] round-8 — **Codex adversarial review 9/15 + HS8 (zsh 호환 fail-closed)** 완료. 최종 **159/159 PASS** (R20-R30 신규 11개 + 기존 148).
+[2026-04-25] round-9 — **Codex 5.5 xhigh 제안 적용: timeout wrapper 7곳 인라인 복제 제거 + `_require_cfg` 계약 검증 함수** 완료. 최종 **13 test suite 전체 PASS** (R31·R32 신규 2개 + smoke Test 9 재작성).
+
+핵심 (라운드-9, 3명 합의 이슈 중 1건):
+- **(C1 HIGH)** `_run_with_timeout` 40줄 함수가 SKILL.md 4곳 + refs/{codex,gemini,cross}-verification.md 3곳 = **총 7곳 인라인 복붙** 제거. `refs/gemini-helper.sh`가 이미 `export -f`하므로 `source cfg.env` 한 줄로 자동 바인딩되는 단일 진실원 구조 확립. Codex 5.5 xhigh가 round-9 제안 문서에서 패치까지 설계.
+- **신규: `_require_cfg` 함수** `refs/gemini-helper.sh`에 추가 — 26개 `_CFG_*` 변수 + 3개 함수(`_run_with_timeout`/`_pick_gemini_model`/`_require_cfg`) 바인딩 일괄 검증. cfg.env 말미에 자동 호출 → 계약 위반 즉시 fail-closed.
+- **`export -f` zsh 호환 가드**: `if [ -n "${BASH_VERSION:-}" ]; then export -f ...; fi` — zsh에서 `export -f`는 bash와 다른 의미라 조건부로 유지.
+- **smoke Test 9 재작성**: 이전엔 "7곳 인라인이 canonical과 SHA256 일치" 검증 (증상 관리). 이제 "helper 3 함수 단일 소유 + runtime 4 파일 인라인 0건" (원인 해결 검증).
+- **R10 패턴 확장**: cfg.env append가 `{printf source; printf _require_cfg}` 그룹 형태 허용.
+- **신규 R31**: grep으로 _require_cfg 존재 + 7곳 인라인 잔존 0건 검증.
+- **신규 R32**: zsh subprocess에서 helper.sh source 후 3 함수 전부 바인딩 실제 실행 검증 (R30 패턴 확장).
+
+보류 (round-10 예정, 2건 3-agent 합의 남음):
+- SKILL.md 2674줄 분할 (Codex가 refs/phases/*.md 16파일 분할안 제시) — 큰 리팩터, 별도 round
+- 테스트 self-fulfillment 탈출 (shell-parity.sh + e2e-preamble.sh + Agent fixture mock) — 별도 round
+
+round-9 메타 분석 산출물: `docs/team-agent/2026-04-25-040151-meta-ultra-report.md` (13KB)
+round-9 Codex 제안 원본: `/tmp/ta-round9-codex-proposal.md` (285줄, ~9.5KB)
 
 핵심 (라운드-8, 공격 벡터 15개 중 수정 완료 9개):
 - **(C1 CRITICAL)** Ultra consolidator schema 삼위일체 drift 해소 — prompt에서 `replicas` 금지, example에 `status` 필수 추가, schema·prompt·example 3곳 동기화.
